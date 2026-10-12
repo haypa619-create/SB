@@ -72,6 +72,46 @@ public final class QuickOrder {
                 || t.contains("confirm") && (t.contains("order") || t.contains("offer"));
     }
 
+    /**
+     * Which menu slot to highlight for the order in progress, so you just click the glowing
+     * slot at each step. Checks the latest step first, since earlier labels can still be on
+     * screen. Returns the index into {@code names} (menu slots only), or -1 for none.
+     *
+     * Buy:  search results (the item) > item page (Create Buy Order) > How many (Custom Amount)
+     *       > How much (Custom Price) > Confirm.
+     * Sell: search results > item page (Create Sell Offer) > price screen (Custom Price) > Confirm.
+     */
+    public static int pickSlot(String title, java.util.List<String> names, Active a) {
+        if (a == null || names == null) return -1;
+        String t = BazaarData.stripFormatting(title == null ? "" : title).toLowerCase(Locale.US);
+        boolean buy = a.side() == Side.BUY;
+
+        if (t.contains("confirm")) {
+            int i = find(names, buy ? "buy order" : "sell offer", false);
+            return i >= 0 ? i : find(names, "confirm", false);
+        }
+        int i = find(names, "custom price", false);
+        if (i >= 0) return i;
+        if (buy) {
+            i = find(names, "custom amount", false);
+            if (i >= 0) return i;
+        }
+        i = find(names, buy ? "create buy order" : "create sell offer", false);
+        if (i >= 0) return i;
+        // Search results: the item itself. Exact name so "Enchanted X" isn't picked for "X".
+        return find(names, a.itemName().toLowerCase(Locale.US), true);
+    }
+
+    private static int find(java.util.List<String> names, String needle, boolean exact) {
+        for (int i = 0; i < names.size(); i++) {
+            String n = names.get(i);
+            if (n == null) continue;
+            n = BazaarData.stripFormatting(n).toLowerCase(Locale.US).trim();
+            if (exact ? n.equals(needle) : n.contains(needle)) return i;
+        }
+        return -1;
+    }
+
     /** 130.4 -> "130.4", 12345.0 -> "12345.0". No commas, since the sign wants a plain number. */
     public static String formatPrice(double price) {
         return String.format(Locale.US, "%.1f", FlipMath.round1(price));
