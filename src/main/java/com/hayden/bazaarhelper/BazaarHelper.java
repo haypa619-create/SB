@@ -667,7 +667,7 @@ public final class BazaarHelper implements ClientModInitializer {
     /** Ends the guide once you've left the Bazaar (closed the menu), so it never points at stale slots. */
     private static void guideTick(Minecraft mc) {
         long now = System.currentTimeMillis();
-        if (mc.screen != null && isGuideScreen(mc.screen)) { QUICK.inMenus(); return; }
+        // Opening a Bazaar menu or sign marks you "in menus" and closing one starts the gap (see AFTER_INIT).
         if (QUICK.abandoned(now)) {
             QUICK.clear();
             if (CONFIG.chatNotes) say(Component.literal("Guide stopped (you closed the Bazaar).").withStyle(ChatFormatting.DARK_GRAY));
