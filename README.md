@@ -23,11 +23,12 @@ No commands needed after that.
 
 | Key or button | What it does |
 |---|---|
-| **B** | Open the quote board |
-| **N** | Do the next most urgent thing |
+| **B** | Open the quote board (also works inside Bazaar menus; on the board it closes it) |
+| **N** | Do the next most urgent thing (works in the world, on the board, and inside Bazaar menus) |
 | **← Board** / **Next ▶** | Top-left of every Bazaar menu: back to the board, or straight to the next thing |
 | **Bid / Ask @ price** | Place that quote: runs `/bz <item>`, outlines each slot to click in green, fills in the signs |
-| **⚠ outbid** | Open the item to re-price from Your Orders (Bazaar Utils' sign button) |
+| **⚠ outbid / ⚠ Pull bid** | Green slots lead you through Manage Orders > your order > Cancel. Then N re-places it at the new price |
+| **Journal** | P&L today / 7 days / all time, and per item: round trips, profit per trip, time to fill |
 | **✕** | Remove an item from the book |
 | **Settings** | Every setting as buttons |
 
@@ -49,7 +50,42 @@ Rebind keys in Options > Controls > Bazaar Helper.
 
 **Position** = stock in your inventory + units in your live sell offer. Bid size tops you up toward 2 x target. Ask size is all the stock you carry, because a Bazaar sell offer lists all of that item in your inventory.
 
-**Next** works in this order: re-price outbid quotes, unload LONG items, rebuild SHORT items, list stock, then bid. Ties go to the better item.
+**Line 2:** open orders vs your cap, fills waiting to claim, coins traded today vs the daily limit, and when your orders were last synced.
+
+**Next** works in this order: pull bids the guard flags and re-price outbid quotes, unload LONG items, rebuild SHORT items, list stock, then bid. Ties go to the better item. At your order cap it only fixes quotes.
+
+## Live orders: synced from Manage Orders
+
+Open **/bz > Manage Orders** now and then. The mod reads every order there (item, price, amount, how much filled, what's waiting to claim) and makes the board match exactly. Between syncs it tracks orders from Bazaar chat.
+
+## Alerts
+
+Prices refresh every 20s. After each refresh the mod checks your live quotes:
+- **Outbid / undercut:** a low note and a chat line. Press N to fix it.
+- **Pull your bid:** the guard says the price is falling fast. Press N.
+- **Fill:** a ping. If a filled buy won't fit in your inventory, a red warning before you claim.
+
+Each alert fires once until it clears. Sounds can be turned off in Settings.
+
+## Guard: protection and fair value
+
+The mod keeps its own price history (Hypixel's API has none; it's saved, so it survives restarts). After about 30 minutes of history per item it:
+- stops bidding and tells you to **pull** live bids when the price falls more than 3% in 30 minutes
+- stops bidding when the price is more than 8% above its 6-hour average (and holds stock when it's 8% below, unless you're LONG)
+- stops bidding when the spread blows out to 3x its usual size (someone bought out the asks or dumped the bids)
+- stops bidding when one order holds the top bid with more than a day of flow (if they pull it, your bid is left far above the market)
+- prices around **fair value** (6-hour average mid): a bid must sit at least the edge below fair, an ask at least the edge above. Edge = max(0.1%, 0.25 x how much the price swings), so jumpy items need more room
+
+Hover an item on the board to see what the guard thinks. Turn it off in Settings, or tune it with `/bzh drop`, `/bzh deviation`, `/bzh fairhours`, `/bzh volk`.
+
+## Limits
+
+- **Max open orders** (default 14): Next won't suggest new orders past it, and the book plans at most half that many items (each can need a bid and an ask). Set it to your real cap in Settings.
+- **Daily limit** (default 15B): the board shows coins traded today, and the mod warns before an order would go past it. `/bzh dailylimit` to change.
+
+## Journal
+
+Every setup, fill, claim and cancel is appended to `config/bazaarhelper-journal.csv` (opens in Excel or Google Sheets): time, event, item, units, price, P&L, minutes to fill. The **Journal** screen sorts items by realized P&L so you can drop the ones that don't pay.
 
 ## The book: profit per inventory slot
 
@@ -101,11 +137,13 @@ To move to a newer Minecraft version, update `gradle.properties` from https://fa
 | Board shows quotes you cancelled | Settings > Reset quote tracking. Cancelled buy orders aren't named in chat. |
 | No green slot in a Bazaar menu | `/bzh debug` prints menu titles. Slot names are matched in `QuickOrder.pickSlot()`. |
 | No ← Board button in a Bazaar menu | `/bzh debug` prints menu titles. Add the missing one in `QuickOrder.isBazaarTitle()`. |
+| N does nothing outside menus | Another control uses N. The mod warns in chat when you join; rebind in Options > Controls > Bazaar Helper. |
+| Manage Orders doesn't sync | `/bzh debug` prints how many orders it read. Order patterns are in `OrderSync.java`. |
 | Lots of idle coins | Give it more slots, lower stock hours, or lower min weekly units. |
 
 ## Commands (optional)
 
-`/bzh board [600m]`, `/bzh next`, `/bzh settings`, `/bzh setup`, `/bzh book`, `/bzh pnl [reset]`, `/bzh item <name>`, `/bzh clear <item>`, `/bzh debug`. Every setting also has a command: `tax`, `total`, `reserve`, `maxitem`, `maxitems`, `slots`, `stockhours`, `skew`, `minflow`, `minunits`, `minmargin`, `maxcrowd`, `crowdweight`. `/bzh help` lists them.
+`/bzh board [600m]`, `/bzh next`, `/bzh journal`, `/bzh settings`, `/bzh setup`, `/bzh book`, `/bzh pnl [reset]`, `/bzh item <name>`, `/bzh clear <item>`, `/bzh debug`. Every setting also has a command: `tax`, `total`, `reserve`, `maxitem`, `maxitems`, `slots`, `stockhours`, `skew`, `minflow`, `minunits`, `minmargin`, `maxcrowd`, `crowdweight`, `maxorders`, `dailylimit`, `drop`, `deviation`, `fairhours`, `volk`. `/bzh help` lists them.
 
 ## Project layout
 
@@ -120,7 +158,13 @@ src/main/java/com/hayden/bazaarhelper/
   QuoteBook.java        Live quotes, cost basis, P&L from chat
   BazaarData.java       Hypixel API: prices, crowding, names, stack sizes
   FlipMath.java         Spread, tax and volume math
-  QuickOrder.java       Sign prompts and Bazaar menu detection
+  QuickOrder.java       Sign prompts, Bazaar menu detection, which slot to highlight
+  OrderSync.java        Reads your orders off the Manage Orders menu
+  Guard.java            Bad-fill protection and fair value
+  PriceHistory.java     The mod's own rolling price history
+  Journal.java          CSV journal and per-item stats
+  JournalScreen.java    The Journal screen
+  Wallet.java           Coins from your purse
   PanelKey.java         B and N hotkeys
   Config.java           Settings and desk book files
   mixin/SignEditAccessor.java

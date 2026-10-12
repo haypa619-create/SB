@@ -113,7 +113,7 @@ public final class BazaarHelper implements ClientModInitializer {
             if (PanelKey.pressed()) openBoard();
             if (PanelKey.nextPressed()) startNext();
             if (++tickCount % 20 == 0) readPurse(client);
-            if (tickCount == 200 || tickCount % 72_000 == 0) warnKeyConflicts();
+            if (!keysChecked && client.player != null && tickCount % 100 == 0) { keysChecked = true; warnKeyConflicts(); }
             autoRefreshTick();
         });
 
@@ -397,6 +397,7 @@ public final class BazaarHelper implements ClientModInitializer {
     }
 
     private static int tickCount = 0;
+    private static boolean keysChecked = false;
     /** Last purse seen on the SkyBlock sidebar, or -1 before it shows up. */
     private static volatile double purse = -1;
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0
+- N and B now work on the board and inside Bazaar menus (key presses go to the open screen). The mod warns if another control shares the key
+- Manage Orders sync: opening /bz > Manage Orders reads your real orders, fills and claims, and the board matches them exactly
+- Outbid / undercut alerts after every price refresh, with a sound. Fill pings, and a warning when a filled buy won't fit in your inventory
+- Re-pricing and pulling: green slots lead through Manage Orders > your order > Cancel, then N re-places it
+- Guard: the mod's own price history (saved across restarts) stops bids on fast drops, stretched prices, spread blowouts and one-order tops, and tells you to pull live bids when an item is falling
+- Fair value quoting: bids must sit an edge below the 6h average, asks an edge above; the edge widens when prices swing
+- Journal screen and config/bazaarhelper-journal.csv: P&L today / 7 days / all time, per item round trips, profit per trip, time to fill
+- Max open orders (default 14) and daily limit (default 15B) with header readouts
+
 ## 0.9.0
 - Coins are automatic: purse from the SkyBlock sidebar + coins in your buy orders + stock you hold. Settings > Coins switches Auto / Manual
 - Prices refresh on their own every 20s whenever you're in a world, so the board is always current when you open it. Refresh button removed

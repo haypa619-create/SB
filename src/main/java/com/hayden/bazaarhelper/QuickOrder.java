@@ -73,7 +73,7 @@ public final class QuickOrder {
     public static boolean isBazaarTitle(String title) {
         String t = BazaarData.stripFormatting(title).toLowerCase(Locale.US);
         return t.contains("bazaar") || t.contains("➜")        // "Bazaar ➜ Mining", "Mining ➜ Coal"
-                || t.contains("buy order") || t.contains("sell offer")
+                || t.contains("buy order") || t.contains("sell offer") || t.contains("order options")
                 || t.contains("how many") || t.contains("how much")
                 || t.contains("at what price") || t.contains("your orders")
                 || t.contains("confirm") && (t.contains("order") || t.contains("offer"));
