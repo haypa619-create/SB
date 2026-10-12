@@ -11,6 +11,9 @@ public final class Config {
     /** 1.25 by default; 1.125 or 1.0 with the Bazaar Flipper account upgrade. */
     public double taxPercent = 1.25;
     /** Coin total the book is built for. */
+    /** Read coins from your purse (+ bids + stock) instead of the number below. */
+    public boolean autoCoins = true;
+    /** Used when autoCoins is off, or before the purse shows on the sidebar. */
     public double defaultTotal = 600_000_000;
     /** Share of the total kept uninvested. */
     public double reservePct = 15;
@@ -39,8 +42,6 @@ public final class Config {
 
     /** Item ids you've excluded from the book (the X on a board row). */
     public java.util.List<String> excluded = new java.util.ArrayList<>();
-    /** Refresh prices while the board is open, every this many seconds (0 = off). */
-    public int autoRefreshSeconds = 20;
     /** Chat notes for quotes going up, fills and realized P&L. */
     public boolean chatNotes = true;
     /** Set after the first-run setup screen. */

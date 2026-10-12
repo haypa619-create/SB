@@ -31,6 +31,11 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.PlayerScoreEntry;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Scoreboard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,6 +102,7 @@ public final class BazaarHelper implements ClientModInitializer {
             }
             if (PanelKey.pressed()) openBoard();
             if (PanelKey.nextPressed()) startNext();
+            if (++tickCount % 20 == 0) readPurse(client);
             autoRefreshTick();
         });
 
@@ -231,14 +237,80 @@ public final class BazaarHelper implements ClientModInitializer {
         Config.saveBook(configDir, DESK);
     }
 
+    private static int tickCount = 0;
+    /** Last purse seen on the SkyBlock sidebar, or -1 before it shows up. */
+    private static volatile double purse = -1;
+
+    /** Reads "Purse: ..." off the sidebar once a second. Display-only. */
+    private static void readPurse(Minecraft mc) {
+        if (mc.level == null) return;
+        try {
+            Scoreboard sb = mc.level.getScoreboard();
+            Objective obj = sb.getDisplayObjective(DisplaySlot.SIDEBAR);
+            if (obj == null) return;
+            List<String> lines = new ArrayList<>();
+            for (PlayerScoreEntry e : sb.listPlayerScores(obj)) {
+                PlayerTeam team = sb.getPlayersTeam(e.owner());
+                lines.add(team == null ? e.owner()
+                        : team.getPlayerPrefix().getString() + e.owner() + team.getPlayerSuffix().getString());
+            }
+            double p = Wallet.parsePurse(lines);
+            if (p >= 0) purse = p;
+        } catch (Exception e) {
+            if (CONFIG.debug) LOG.warn("Sidebar read failed: {}", e.toString());
+        }
+    }
+
+    /** Coins locked in your live buy orders, from Bazaar chat. */
+    private static double lockedInBids() {
+        double sum = 0;
+        for (QuoteBook.Item it : DESK.items.values()) sum += it.bidUnits * it.bidPrice;
+        return sum;
+    }
+
+    /** Stock you hold (inventory + live sell offers), valued at the top bid. */
+    private static double stockValue() {
+        double sum = 0;
+        for (Map.Entry<String, Long> e : scanInventory().counts().entrySet()) {
+            BazaarData.Product p = DATA.get(e.getKey());
+            if (p != null) sum += e.getValue() * p.topBid();
+        }
+        for (Map.Entry<String, QuoteBook.Item> e : DESK.items.entrySet()) {
+            if (e.getValue().askUnits <= 0) continue;
+            String id = DATA.idForName(e.getKey());
+            BazaarData.Product p = id == null ? null : DATA.get(id);
+            if (p != null) sum += e.getValue().askUnits * p.topBid();
+        }
+        return sum;
+    }
+
+    /** One line for tooltips: where the coin total came from. */
+    public static String capitalNote() {
+        if (lastTotal > 0) return "Coins: " + FlipMath.fmt(lastTotal) + " (set with /bzh board; /bzh board alone goes back to auto)";
+        if (!CONFIG.autoCoins) return "Coins: " + FlipMath.fmt(CONFIG.defaultTotal) + " (manual, Settings > Coins)";
+        if (purse < 0) return "Coins: waiting for Purse on the SkyBlock sidebar, using " + FlipMath.fmt(CONFIG.defaultTotal) + " for now";
+        return "Coins (auto): purse " + FlipMath.fmt(purse) + " + in bids " + FlipMath.fmt(lockedInBids())
+                + " + stock " + FlipMath.fmt(stockValue());
+    }
+
+    public static boolean coinsAreAuto() {
+        return lastTotal <= 0 && CONFIG.autoCoins && purse >= 0;
+    }
+
+    public static double detectedPurse() {
+        return purse;
+    }
+
     private static volatile boolean refreshing = false;
     private static volatile long lastAutoAttempt = 0;
 
-    /** While the board is open, refresh prices every autoRefreshSeconds and redraw it. */
+    /** Prices refresh on their own every 20s while you're in a world, and an open board redraws. */
+    private static final long REFRESH_MS = 20_000;
+
     private static void autoRefreshTick() {
-        if (!BoardScreen.isOpen() || CONFIG.autoRefreshSeconds <= 0 || refreshing) return;
+        if (refreshing || Minecraft.getInstance().level == null) return;
         long now = System.currentTimeMillis();
-        long every = CONFIG.autoRefreshSeconds * 1000L;
+        long every = REFRESH_MS;
         if (now - DATA.lastUpdated() < every || now - lastAutoAttempt < every) return; // also backs off if the API is down
         lastAutoAttempt = now;
         refreshing = true;
@@ -292,8 +364,11 @@ public final class BazaarHelper implements ClientModInitializer {
 
     // ---------- board ----------
 
+    /** Coins to plan with: auto from your purse + bids + stock, unless you set it by hand. */
     private static double boardTotal() {
-        return lastTotal > 0 ? lastTotal : CONFIG.defaultTotal;
+        if (lastTotal > 0) return lastTotal;
+        if (CONFIG.autoCoins && purse >= 0) return Wallet.capital(purse, lockedInBids(), stockValue());
+        return CONFIG.defaultTotal;
     }
 
     /** Opens the board: instantly if prices are fresh, otherwise after a quick fetch. First run opens setup. */
@@ -495,7 +570,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 .executes(BazaarHelper::help)
                 .then(literal("help").executes(BazaarHelper::help))
                 .then(literal("board")
-                        .executes(c -> { lastTotal = CONFIG.defaultTotal; openBoard(); return 1; })
+                        .executes(c -> { lastTotal = -1; openBoard(); return 1; })
                         .then(argument("coins", StringArgumentType.word()).executes(c -> {
                             Double total = parse(c, StringArgumentType.getString(c, "coins"));
                             if (total == null) return 0;

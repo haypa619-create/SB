@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+- Coins are automatic: purse from the SkyBlock sidebar + coins in your buy orders + stock you hold. Settings > Coins switches Auto / Manual
+- Prices refresh on their own every 20s whenever you're in a world, so the board is always current when you open it. Refresh button removed
+
 ## 0.8.0
 - After you click Bid or Ask on the board, every Bazaar menu outlines the slot to click next in pulsing green: the item, Create Buy Order / Create Sell Offer, Custom Amount, Custom Price, then confirm
 - The highlight stops once the order is set up

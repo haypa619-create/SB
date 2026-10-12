@@ -14,7 +14,7 @@ Relisting is done with **Bazaar Utils** and price tooltips come from **Skyblocke
 ## Quick start
 
 1. Add the jar to your SkyBlock Enhanced instance (see Install below).
-2. Join Hypixel and press **B**. The first time, a setup screen asks for your coins, tax tier and slots. Click **Done**.
+2. Join Hypixel and press **B**. The first time, a setup screen asks for your tax tier and slots (coins are read from your purse). Click **Done**.
 3. On the board, press **N** (or click **Next**) and follow the chat line. Repeat.
 
 No commands needed after that.
@@ -35,7 +35,9 @@ Rebind keys in Options > Controls > Bazaar Helper.
 
 ## The board
 
-**Header:** coins, slots used and free, realized P&L, mark-to-market, data age. Then **Next** with your to-do count, plus Settings / Refresh / Close. It refreshes every 20s while open.
+**Header:** coins, slots used and free, realized P&L, mark-to-market, data age. Then **Next** with your to-do count, plus Settings / Close. Prices refresh on their own every 20s, so there's no Refresh button.
+
+**Coins are automatic.** The mod reads **Purse** off the SkyBlock sidebar and adds the coins sitting in your buy orders and the stock you hold (at the top bid). As you grow from 600m to 1b+, the book grows with you. Hover the coin total to see the breakdown. Settings > Coins switches to Manual if you want to cap it.
 
 **Rows:** `● item  position/target  crowd` | bid side | ask side. Hover the item for target, slots, spread, est/day, profit per slot, cost basis and P&L.
 

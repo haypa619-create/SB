@@ -42,7 +42,9 @@ public final class SettingsScreen extends Screen {
 
         // ---- left column: money and inventory ----
         int ly = y;
-        stepper(left, ly, colW, "Coins", "Coins you're market making with.",
+        coinsMode(left, ly, colW, c);
+        ly += ROW_H;
+        stepper(left, ly, colW, "Manual coins", "Only used when Coins is set to Manual, or before your purse shows on the sidebar.",
                 () -> c.defaultTotal, d -> c.defaultTotal = clamp(c.defaultTotal + d * coinStep(c.defaultTotal), 10e6, 1e11),
                 v -> FlipMath.fmt(v));
         ly += ROW_H;
@@ -77,13 +79,11 @@ public final class SettingsScreen extends Screen {
         ry += ROW_H;
         stepper(right, ry, colW, "Max crowd", "Skip items with more competing orders than this near the top.",
                 () -> c.maxCrowd, d -> c.maxCrowd = (int) clamp(c.maxCrowd + d * 2, 1, 100), v -> Integer.toString((int) v));
-
-        int by = y + 5 * ROW_H + 8;
-        toggle(left, by, colW, "Auto-refresh board", "Refresh prices every 20s while the board is open.",
-                () -> c.autoRefreshSeconds > 0, on -> c.autoRefreshSeconds = on ? 20 : 0);
-        toggle(right, by, colW, "Chat notes", "Short chat lines when quotes go up, fill, and realize P&L.",
+        ry += ROW_H;
+        toggle(right, ry, colW, "Chat notes", "Short chat lines when quotes go up, fill, and realize P&L.",
                 () -> c.chatNotes, on -> c.chatNotes = on);
-        by += ROW_H + 6;
+
+        int by = y + 6 * ROW_H + 8;
 
         // ---- footer ----
         int third = (2 * colW + 8 - 8) / 3;
@@ -166,6 +166,26 @@ public final class SettingsScreen extends Screen {
             BazaarHelper.CONFIG.save();
             b.setMessage(onOff(get.get()));
         }).bounds(x + w - valW, y, valW, 20).build());
+    }
+
+    /** Coins: Auto (purse + bids + stock, read live) or Manual (the number below). */
+    private void coinsMode(int x, int y, int w, Config c) {
+        int valW = 64 + 2 * 20 + 4;
+        label(x, y, w - valW - 2, "Coins", "Auto reads your Purse off the SkyBlock sidebar and adds coins in\n"
+                + "your buy orders and the stock you hold. Follows you as you grow.");
+        addRenderableWidget(Button.builder(coinsLabel(c), b -> {
+                    c.autoCoins = !c.autoCoins;
+                    c.save();
+                    b.setMessage(coinsLabel(c));
+                }).bounds(x + w - valW, y, valW, 20)
+                .tooltip(Tooltip.create(Component.literal(BazaarHelper.capitalNote() + "\n\nClick to switch Auto / Manual")))
+                .build());
+    }
+
+    private static Component coinsLabel(Config c) {
+        if (!c.autoCoins) return Component.literal("Manual").withStyle(ChatFormatting.YELLOW);
+        double p = BazaarHelper.detectedPurse();
+        return Component.literal(p >= 0 ? "Auto: " + FlipMath.fmt(p) : "Auto").withStyle(ChatFormatting.GREEN);
     }
 
     private static Component onOff(boolean on) {

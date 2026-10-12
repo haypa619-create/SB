@@ -14,7 +14,7 @@ import java.util.Locale;
  * The quote board.
  *
  *   [ desk: coins | slots | realized | MTM ]
- *   [ Next: <most urgent> (N to do) ] [ Settings ] [ Refresh ] [ Close ]
+ *   [ Next: <most urgent> (N to do) ] [ Settings ] [ Close ]
  *   [x] [ item  position/target  STATE  crowd ] [ BID side ] [ ASK side ]
  *   ...
  *
@@ -61,6 +61,7 @@ public final class BoardScreen extends Screen {
         // ---- header line 1: the desk ----
         boolean slotsTight = header.freeSlots() < Math.min(3, book.slotsUsed());
         MutableComponent sum = Component.literal("◆ " + FlipMath.fmt(book.total())).withStyle(ChatFormatting.GOLD)
+                .append(Component.literal(BazaarHelper.coinsAreAuto() ? " auto" : " manual").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal(String.format(Locale.US, "   slots %d/%d", book.slotsUsed(), book.slotBudget()))
                         .withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(String.format(Locale.US, " (%d free)", header.freeSlots()))
@@ -72,11 +73,11 @@ public final class BoardScreen extends Screen {
                 .append(Component.literal("   " + age(header.dataTime())).withStyle(ChatFormatting.DARK_GRAY));
         Button summary = Button.builder(sum, b -> {}).bounds(left, y, w, 20)
                 .tooltip(Tooltip.create(Component.literal(String.format(Locale.US,
-                        "Committed %s (stock + bids)  |  reserve %s  |  idle %s\nEst. %s/day from spread\n\n"
+                        "%s\n\nCommitted %s (stock + bids)  |  reserve %s  |  idle %s\nEst. %s/day from spread\n\n"
                                 + "Realized: spread captured on stock sold, after tax\n"
                                 + "MTM: unrealized gain or loss on stock held, at mid price\n"
                                 + "Idle: coins the book can't place (slots or liquidity ran out)%s",
-                        FlipMath.fmt(book.committed()), FlipMath.fmt(book.reserve()), FlipMath.fmt(book.idle()),
+                        BazaarHelper.capitalNote(), FlipMath.fmt(book.committed()), FlipMath.fmt(book.reserve()), FlipMath.fmt(book.idle()),
                         FlipMath.fmt(book.estDailyProfit()),
                         slotsTight ? "\n\nInventory nearly full: claimed fills will go to your stash." : ""))))
                 .build();
@@ -86,7 +87,7 @@ public final class BoardScreen extends Screen {
 
         // ---- header line 2: controls ----
         int ctrlW = 64;
-        int nextW = w - 3 * (ctrlW + 4);
+        int nextW = w - 2 * (ctrlW + 4);
         NextAction.Pick next = header.next();
         if (next != null) {
             addRenderableWidget(Button.builder(Component.literal("▶ Next: " + next.describe())
@@ -107,10 +108,8 @@ public final class BoardScreen extends Screen {
         int cx = left + nextW + 4;
         addRenderableWidget(Button.builder(Component.literal("Settings"), b -> BazaarHelper.show(new SettingsScreen(false)))
                 .bounds(cx, y, ctrlW, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> { this.onClose(); BazaarHelper.openBoardFresh(); })
-                .bounds(cx + ctrlW + 4, y, ctrlW, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
-                .bounds(cx + 2 * (ctrlW + 4), y, ctrlW, 20).build());
+                .bounds(cx + ctrlW + 4, y, ctrlW, 20).build());
         y += 28;
 
         if (rows.isEmpty()) {
