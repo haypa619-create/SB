@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,3 +37,14 @@ jobs:
         with:
           name: bazaar-helper
           path: build/libs/*.jar
+      - name: Publish release
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          TAG="v${VERSION}-build.${{ github.run_number }}"
+          gh release create "$TAG" "build/libs/bazaar-helper-${VERSION}.jar" \
+            --title "Bazaar Helper ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Download the .jar below and add it to your Minecraft 26.2 profile (Modrinth App: Content > Add content > Add from file). Requires Fabric API." \
+            --latest
