@@ -1,0 +1,40 @@
+name: Probe
+on:
+  push:
+    branches: [probe3]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew && ./gradlew compileJava || true
+      - name: Probe
+        run: |
+          set +e +o pipefail
+          MC=/home/runner/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.2/minecraft-merged-deobf-26.2.jar
+          SCREEN=$(find ~/.gradle -name 'fabric-screen-api-v1*.jar' | grep -v sources | head -1)
+          out=probe.txt; : > $out
+          javap -cp "$MC" net.minecraft.client.gui.screens.Screen | grep -iE "keyPressed|onClose|charTyped" >> $out
+          javap -cp "$MC" net.minecraft.client.gui.components.events.ContainerEventHandler | grep -iE "keyPressed" >> $out
+          javap -cp "$MC" net.minecraft.client.KeyMapping | grep -iE "matches|consumeClick|isDown|getTranslatedKeyMessage|same" >> $out
+          javap -cp "$MC" net.minecraft.client.input.KeyEvent | head -30 >> $out
+          javap -cp "$SCREEN" 'net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents' >> $out
+          for c in AfterKeyPress AllowKeyPress; do javap -cp "$SCREEN" "net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents\$$c" >> $out; done
+          javap -cp "$MC" net.minecraft.client.resources.sounds.SimpleSoundInstance | grep -iE "forUI" >> $out
+          javap -cp "$MC" net.minecraft.sounds.SoundEvents | grep -iE "NOTE_BLOCK_PLING|EXPERIENCE_ORB_PICKUP|NOTE_BLOCK_BASS|ANVIL_LAND" >> $out
+          javap -cp "$MC" net.minecraft.client.Minecraft | grep -iE "getSoundManager|font" >> $out
+          javap -cp "$MC" net.minecraft.client.sounds.SoundManager | grep -E " play\(" >> $out
+          javap -cp "$MC" net.minecraft.world.item.component.ItemLore | grep -iE "lines|styled" >> $out
+          javap -cp "$MC" net.minecraft.core.component.DataComponents | grep -E " LORE| CUSTOM_DATA" >> $out
+          javap -cp "$MC" net.minecraft.world.item.ItemStack | grep -E " get\(" >> $out
+          javap -cp "$MC" net.minecraft.network.chat.ClickEvent | head -20 >> $out
+          javap -cp "$MC" 'net.minecraft.network.chat.ClickEvent$RunCommand' | head -8 >> $out
+          javap -cp "$MC" net.minecraft.network.chat.Style | grep -iE "withClickEvent|withHoverEvent" >> $out
+          javap -cp "$MC" 'net.minecraft.network.chat.HoverEvent$ShowText' | head -6 >> $out
+          split -b 3500 $out part_
+          for f in part_*; do msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' $f); echo "::warning title=probe $f::$msg"; done
