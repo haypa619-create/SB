@@ -13,7 +13,8 @@ package com.hayden.bazaarhelper;
  */
 public final class MarketMaker {
     public enum State { SHORT, BALANCED, LONG }
-    public enum Action { PLACE, LIVE, OUTBID, HOLD, EMPTY }
+    /** PULL: you have a live bid but the guard says get out (price falling fast). */
+    public enum Action { PLACE, LIVE, OUTBID, HOLD, EMPTY, PULL }
 
     public static final double SHORT_BAND = 0.5;
     public static final double LONG_BAND = 1.5;
@@ -37,6 +38,15 @@ public final class MarketMaker {
     public static Quote quote(BazaarData.Product p, long target, long inventory,
                               long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
                               double taxPct, double skewShare) {
+        return quote(p, target, inventory, liveAskUnits, liveAskPrice, liveBidUnits, liveBidPrice, taxPct, skewShare,
+                Guard.Assessment.NONE);
+    }
+
+    /** Same, with the guard's view of the item (fair value, edge, and reasons to stay out). */
+    public static Quote quote(BazaarData.Product p, long target, long inventory,
+                              long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
+                              double taxPct, double skewShare, Guard.Assessment g) {
+        if (g == null) g = Guard.Assessment.NONE;
         long position = inventory + liveAskUnits;
         State state = position < target * SHORT_BAND ? State.SHORT
                 : position > target * LONG_BAND ? State.LONG : State.BALANCED;
@@ -58,8 +68,14 @@ public final class MarketMaker {
         // ---- bid side ----
         long bidSize = 0;
         Action bidAction;
+        double bidCap = g.hasFair() ? FlipMath.round1(g.fair() * (1 - g.edgePct() / 100.0)) : Double.MAX_VALUE;
         if (liveBidUnits > 0) {
-            bidAction = liveBidPrice + TOLERANCE < topBid ? Action.OUTBID : Action.LIVE;
+            if (g.pullBid()) {
+                bidAction = Action.PULL;
+                note = "pull your bid: " + g.reason();
+            } else {
+                bidAction = liveBidPrice + TOLERANCE < topBid ? Action.OUTBID : Action.LIVE;
+            }
         } else if (topBid <= 0 || topAsk <= 0) {
             bidAction = Action.HOLD;
             note = "one side of the book is empty";
@@ -69,6 +85,12 @@ public final class MarketMaker {
         } else if (!profitable) {
             bidAction = Action.HOLD;
             note = "spread closed after tax";
+        } else if (g.holdBid()) {
+            bidAction = Action.HOLD;
+            note = "staying out: " + g.reason();
+        } else if (bidPrice > bidCap) {
+            bidAction = Action.HOLD;
+            note = "bid would be above fair value (" + FlipMath.fmt(g.fair()) + " minus " + String.format(java.util.Locale.US, "%.2f", g.edgePct()) + "% edge)";
         } else {
             bidSize = Math.max(0, Math.min(2 * target - position, Planner.MAX_ORDER_UNITS));
             bidAction = bidSize > 0 ? Action.PLACE : Action.HOLD;
@@ -78,8 +100,16 @@ public final class MarketMaker {
         Action askAction;
         if (liveAskUnits > 0) {
             askAction = topAsk > 0 && liveAskPrice - TOLERANCE > topAsk ? Action.OUTBID : Action.LIVE;
+        } else if (inventory > 0 && g.holdAsk() && state != State.LONG) {
+            askAction = Action.HOLD;
+            if (note.isEmpty()) note = "holding stock: " + g.reason();
         } else if (inventory > 0 && topAsk > 0) {
             askAction = Action.PLACE;
+            double floor = g.hasFair() ? FlipMath.round1(g.fair() * (1 + g.edgePct() / 100.0)) : 0;
+            if (state != State.LONG && askPrice < floor) {
+                askPrice = Math.max(askPrice, floor);
+                if (note.isEmpty()) note = "ask raised to fair value + edge";
+            }
         } else if (inventory > 0) {
             askAction = Action.PLACE;
             askPrice = FlipMath.round1(Math.max(askPrice, topBid * 1.03)); // no asks to undercut: list 3% over bid

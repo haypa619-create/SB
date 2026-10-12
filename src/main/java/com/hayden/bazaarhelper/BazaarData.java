@@ -31,9 +31,15 @@ public final class BazaarData {
      */
     public record Product(String id, double topBid, double topAsk,
                           double instaBuyWeek, double instaSellWeek,
-                          int bidCrowd, int askCrowd) {
+                          int bidCrowd, int askCrowd,
+                          double topBidUnits, int topBidOrders, double topAskUnits, int topAskOrders) {
         public Product(String id, double topBid, double topAsk, double instaBuyWeek, double instaSellWeek) {
             this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, 1, 1);
+        }
+
+        public Product(String id, double topBid, double topAsk, double instaBuyWeek, double instaSellWeek,
+                       int bidCrowd, int askCrowd) {
+            this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd, 0, 0, 0, 0);
         }
 
         /** Competing orders on the busier side; that's the side you'll relist most. */
@@ -152,7 +158,10 @@ public final class BazaarData {
             double instaSellWeek = qs != null && qs.has("sellMovingWeek") ? qs.get("sellMovingWeek").getAsDouble() : 0;
             int bidCrowd = crowd(p.getAsJsonArray("sell_summary"), topBid, false);
             int askCrowd = crowd(p.getAsJsonArray("buy_summary"), topAsk, true);
-            out.put(e.getKey(), new Product(e.getKey(), topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd));
+            JsonObject bidTop = first(p.getAsJsonArray("sell_summary"));
+            JsonObject askTop = first(p.getAsJsonArray("buy_summary"));
+            out.put(e.getKey(), new Product(e.getKey(), topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd,
+                    num(bidTop, "amount"), (int) num(bidTop, "orders"), num(askTop, "amount"), (int) num(askTop, "orders")));
         }
         return out;
     }
@@ -183,6 +192,14 @@ public final class BazaarData {
             count += lvl.has("orders") ? lvl.get("orders").getAsInt() : 1;
         }
         return count;
+    }
+
+    private static JsonObject first(JsonArray arr) {
+        return arr == null || arr.isEmpty() ? null : arr.get(0).getAsJsonObject();
+    }
+
+    private static double num(JsonObject o, String key) {
+        return o != null && o.has(key) ? o.get(key).getAsDouble() : 0;
     }
 
     private static double firstPrice(JsonArray arr) {

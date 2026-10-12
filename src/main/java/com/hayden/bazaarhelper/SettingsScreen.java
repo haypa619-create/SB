@@ -83,7 +83,22 @@ public final class SettingsScreen extends Screen {
         toggle(right, ry, colW, "Chat notes", "Short chat lines when quotes go up, fill, and realize P&L.",
                 () -> c.chatNotes, on -> c.chatNotes = on);
 
-        int by = y + 6 * ROW_H + 8;
+        // ---- protection and limits ----
+        int gy = y + 6 * ROW_H + 6;
+        stepper(left, gy, colW, "Max open orders", "Hypixel's cap on open Bazaar orders. Next stops adding orders at the cap\n"
+                        + "and the book plans at most half this many items. Raise it if your cap is higher.",
+                () -> c.maxOrders, d -> c.maxOrders = (int) clamp(c.maxOrders + d, 1, 100), v -> Integer.toString((int) v));
+        toggle(right, gy, colW, "Guard", "Stops bidding (and tells you to pull live bids) when an item is falling fast,\n"
+                        + "stretched above its average, its spread blows out, or one big order props up the top.\n"
+                        + "Also prices around a fair value from the mod's own price history.",
+                () -> c.guardOn, on -> c.guardOn = on);
+        gy += ROW_H;
+        toggle(left, gy, colW, "Sounds", "Ping on fills; low note on outbid, undercut and pull warnings.",
+                () -> c.sounds, on -> c.sounds = on);
+        stepper(right, gy, colW, "Pull on drop", "Pull bids when the price falls this much in 30 minutes.",
+                () -> c.guardDropPct, d -> c.guardDropPct = clamp(c.guardDropPct + d * 0.5, 0.5, 50), v -> trim(v) + "%");
+
+        int by = gy + ROW_H + 8;
 
         // ---- footer ----
         int third = (2 * colW + 8 - 8) / 3;

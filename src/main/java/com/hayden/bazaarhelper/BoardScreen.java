@@ -4,6 +4,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
@@ -13,8 +14,9 @@ import java.util.Locale;
 /**
  * The quote board.
  *
- *   [ desk: coins | slots | realized | MTM ]
- *   [ Next: <most urgent> (N to do) ] [ Settings ] [ Close ]
+ *   [ desk: coins | slots | today | realized | MTM | data age ]
+ *   [ orders 9/14 | to claim | traded today vs limit | last sync ]
+ *   [ Next: <most urgent> (N to do) ] [ Journal ] [ Settings ] [ Close ]
  *   [x] [ item  position/target  STATE  crowd ] [ BID side ] [ ASK side ]
  *   ...
  *
@@ -26,7 +28,9 @@ public final class BoardScreen extends Screen {
                       QuoteBook.Item desk, double mtm) {}
 
     public record Header(Planner.Book book, int freeSlots, double realized, double mtm,
-                         NextAction.Pick next, int todo, long dataTime) {}
+                         NextAction.Pick next, int todo, long dataTime,
+                         double today, int liveOrders, int maxOrders, int toClaim,
+                         double dayVolume, double dailyLimit, long syncedAt) {}
 
     private static final int ROW_H = 22;
     private static final int SIDE_W = 116;
@@ -66,6 +70,8 @@ public final class BoardScreen extends Screen {
                         .withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(String.format(Locale.US, " (%d free)", header.freeSlots()))
                         .withStyle(slotsTight ? ChatFormatting.RED : ChatFormatting.DARK_GRAY))
+                .append(Component.literal("   today " + signed(header.today()))
+                        .withStyle(header.today() >= 0 ? ChatFormatting.GREEN : ChatFormatting.RED))
                 .append(Component.literal("   realized " + signed(header.realized()))
                         .withStyle(header.realized() >= 0 ? ChatFormatting.GREEN : ChatFormatting.RED))
                 .append(Component.literal("   MTM " + signed(header.mtm()))
@@ -85,9 +91,31 @@ public final class BoardScreen extends Screen {
         addRenderableWidget(summary);
         y += 22;
 
+        // ---- header line 2: orders, claims, daily limit, sync ----
+        boolean capped = header.liveOrders() >= header.maxOrders();
+        double used = header.dailyLimit() > 0 ? header.dayVolume() / header.dailyLimit() : 0;
+        MutableComponent ops = Component.literal(String.format(Locale.US, "orders %d/%d", header.liveOrders(), header.maxOrders()))
+                .withStyle(capped ? ChatFormatting.RED : ChatFormatting.GRAY)
+                .append(Component.literal(header.toClaim() > 0 ? "   " + header.toClaim() + " to claim" : "   nothing to claim")
+                        .withStyle(header.toClaim() > 0 ? ChatFormatting.YELLOW : ChatFormatting.DARK_GRAY))
+                .append(Component.literal("   traded today " + FlipMath.fmt(header.dayVolume()) + " / " + FlipMath.fmt(header.dailyLimit()))
+                        .withStyle(used > 0.9 ? ChatFormatting.RED : used > 0.7 ? ChatFormatting.YELLOW : ChatFormatting.GRAY))
+                .append(Component.literal("   " + (header.syncedAt() > 0 ? "orders synced " + ago(header.syncedAt()) : "open Manage Orders once to sync"))
+                        .withStyle(ChatFormatting.DARK_GRAY));
+        Button opsLine = Button.builder(ops, b -> {}).bounds(left, y, w, 20)
+                .tooltip(Tooltip.create(Component.literal(
+                        "Orders: open orders vs Hypixel's cap (Settings > Max open orders). At the cap, Next only fixes quotes.\n"
+                                + "To claim: fills waiting in Manage Orders.\n"
+                                + "Traded today: coins put into new orders today (UTC) vs your daily limit.\n"
+                                + "Sync: opening Manage Orders (/bz > Manage Orders) reads your real orders, so the board is exact.")))
+                .build();
+        opsLine.active = false;
+        addRenderableWidget(opsLine);
+        y += 22;
+
         // ---- header line 2: controls ----
         int ctrlW = 64;
-        int nextW = w - 2 * (ctrlW + 4);
+        int nextW = w - 3 * (ctrlW + 4);
         NextAction.Pick next = header.next();
         if (next != null) {
             addRenderableWidget(Button.builder(Component.literal("▶ Next: " + next.describe())
@@ -106,10 +134,14 @@ public final class BoardScreen extends Screen {
             addRenderableWidget(done);
         }
         int cx = left + nextW + 4;
+        addRenderableWidget(Button.builder(Component.literal("Journal"), b -> BazaarHelper.show(new JournalScreen()))
+                .bounds(cx, y, ctrlW, 20)
+                .tooltip(Tooltip.create(Component.literal("P&L by day and by item, fill times. Saved as a spreadsheet file too.")))
+                .build());
         addRenderableWidget(Button.builder(Component.literal("Settings"), b -> BazaarHelper.show(new SettingsScreen(false)))
-                .bounds(cx, y, ctrlW, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
                 .bounds(cx + ctrlW + 4, y, ctrlW, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
+                .bounds(cx + 2 * (ctrlW + 4), y, ctrlW, 20).build());
         y += 28;
 
         if (rows.isEmpty()) {
@@ -197,7 +229,8 @@ public final class BoardScreen extends Screen {
                         FlipMath.fmt(l.flip().profitPerUnit()), l.flip().marginPct(),
                         FlipMath.fmt(l.estDailyProfit()), FlipMath.fmt(l.profitPerSlot()),
                         signed(d == null ? 0 : d.realized), d == null ? 0 : d.roundTrips,
-                        deskLine, q.note().isEmpty() ? "" : "\n\n" + q.note()))))
+                        deskLine, q.note().isEmpty() ? "" : "\n\n" + q.note())
+                        + BazaarHelper.guardInfo(l.flip().id()))))
                 .build();
         b.active = false;
         return b;
@@ -212,9 +245,11 @@ public final class BoardScreen extends Screen {
                     "Re-checks the price, opens /bz " + r.name() + ".\nCustom Amount and Custom Price get filled in.",
                     x, y, () -> BazaarHelper.startQuote(id, QuickOrder.Side.BUY));
             case OUTBID -> clickable(Component.literal("⚠ Bid outbid").withStyle(ChatFormatting.RED),
-                    "Someone's above your bid. Opens /bz " + r.name()
-                            + ".\nRe-price from Your Orders with Bazaar Utils' sign button.",
-                    x, y, () -> BazaarHelper.openBazaarFor(id));
+                    "Someone's above your bid. Green slots lead you through cancelling it,\nthen N puts it back up at the new price.",
+                    x, y, () -> BazaarHelper.startCancel(id, QuickOrder.Side.BUY, false));
+            case PULL -> clickable(Component.literal("⚠ Pull bid").withStyle(ChatFormatting.RED),
+                    q.note() + "\nGreen slots lead you through cancelling it.",
+                    x, y, () -> BazaarHelper.startCancel(id, QuickOrder.Side.BUY, true));
             case LIVE -> inactive(Component.literal("✔ Bid live").withStyle(ChatFormatting.DARK_GREEN), x, y,
                     "Your bid is on top.");
             case HOLD, EMPTY -> inactive(Component.literal("Bid hold").withStyle(ChatFormatting.DARK_GRAY), x, y,
@@ -231,12 +266,13 @@ public final class BoardScreen extends Screen {
                     "Re-checks the price, opens /bz " + r.name() + ".\nCustom Price gets filled in. Lists all of it you carry.",
                     x, y, () -> BazaarHelper.startQuote(id, QuickOrder.Side.SELL));
             case OUTBID -> clickable(Component.literal("⚠ Ask outbid").withStyle(ChatFormatting.RED),
-                    "Someone's below your ask. Opens /bz " + r.name()
-                            + ".\nRe-price from Your Orders with Bazaar Utils' sign button.",
-                    x, y, () -> BazaarHelper.openBazaarFor(id));
+                    "Someone's below your ask. Green slots lead you through cancelling it,\nthen N lists it again at the new price.",
+                    x, y, () -> BazaarHelper.startCancel(id, QuickOrder.Side.SELL, false));
             case LIVE -> inactive(Component.literal("✔ Ask live").withStyle(ChatFormatting.DARK_AQUA), x, y,
                     "Your ask is on top.");
-            case HOLD, EMPTY -> inactive(Component.literal("No stock").withStyle(ChatFormatting.DARK_GRAY), x, y,
+            case HOLD -> inactive(Component.literal("Ask hold").withStyle(ChatFormatting.DARK_GRAY), x, y,
+                    q.note().isEmpty() ? "Holding stock for now." : q.note());
+            case EMPTY, PULL -> inactive(Component.literal("No stock").withStyle(ChatFormatting.DARK_GRAY), x, y,
                     "Nothing in your inventory to list yet. Bids fill into stock.");
         };
     }
@@ -266,6 +302,22 @@ public final class BoardScreen extends Screen {
 
     static String signed(double v) {
         return (v >= 0 ? "+" : "") + FlipMath.fmt(v);
+    }
+
+    static String ago(long time) {
+        long s = Math.max(0, (System.currentTimeMillis() - time) / 1000);
+        if (s < 60) return s + "s ago";
+        if (s < 3600) return (s / 60) + "m ago";
+        if (s < 86400) return (s / 3600) + "h ago";
+        return (s / 86400) + "d ago";
+    }
+
+    /** B closes the board, N does the next thing (key presses go to the screen while it's open). */
+    @Override
+    public boolean keyPressed(KeyEvent e) {
+        if (PanelKey.isNext(e)) { this.onClose(); BazaarHelper.startNext(); return true; }
+        if (PanelKey.isBoard(e)) { this.onClose(); return true; }
+        return super.keyPressed(e);
     }
 
     static String age(long time) {

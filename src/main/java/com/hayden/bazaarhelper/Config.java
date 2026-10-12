@@ -40,6 +40,25 @@ public final class Config {
     /** Skip items with more competing orders than this near the top (0.1 wars). */
     public int maxCrowd = 12;
 
+    /** Hypixel's cap on open Bazaar orders. Next stops suggesting new orders at the cap. */
+    public int maxOrders = 14;
+    /** Hypixel's daily Bazaar limit in coins. The board warns as you get close. */
+    public double dailyLimit = 15_000_000_000.0;
+
+    /** Guard: stop bidding / pull bids on bad-fill signals (see Guard.java). */
+    public boolean guardOn = true;
+    /** Pull bids when the mid falls this much in 30 minutes. */
+    public double guardDropPct = 3;
+    /** Stop bidding when the mid is this far above its average. */
+    public double guardDeviationPct = 8;
+    /** Hours of price history that make the fair value. */
+    public double fairHours = 6;
+    /** Extra edge per % of price swing. 0 = quote the plain top of book. */
+    public double volK = 0.25;
+
+    /** Sound on outbid, fills and pull warnings. */
+    public boolean sounds = true;
+
     /** Item ids you've excluded from the book (the X on a board row). */
     public java.util.List<String> excluded = new java.util.ArrayList<>();
     /** Chat notes for quotes going up, fills and realized P&L. */
@@ -53,8 +72,19 @@ public final class Config {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private transient Path file;
 
+    public Guard.Settings guardSettings() {
+        Guard.Settings d = Guard.Settings.defaults();
+        return new Guard.Settings(fairHours, guardDropPct, d.dropMinutes(), guardDeviationPct, d.spreadBlowout(),
+                d.whaleDays(), d.minEdgePct(), volK);
+    }
+
+    /** Items that fit under the order cap: each item can need a bid and an ask. */
+    public int effectiveMaxItems() {
+        return Math.max(1, Math.min(maxItems, maxOrders / 2));
+    }
+
     public Planner.Settings plannerSettings(double total) {
-        return new Planner.Settings(taxPercent, total, reservePct, maxItemPct, maxItems, slotBudget, stockHours,
+        return new Planner.Settings(taxPercent, total, reservePct, maxItemPct, effectiveMaxItems(), slotBudget, stockHours,
                 minDailyCoinFlow, minWeeklyUnits / 7.0, minMarginPct, maxCrowd, crowdWeight);
     }
 
@@ -83,6 +113,31 @@ public final class Config {
         }
     }
 
+    // ---------- price history ----------
+
+    public static PriceHistory loadHistory(Path configDir) {
+        Path f = configDir.resolve("bazaarhelper-history.json");
+        try {
+            if (Files.exists(f)) {
+                PriceHistory h = new Gson().fromJson(Files.readString(f), PriceHistory.class);
+                if (h != null) { h.fixAfterLoad(); return h; }
+            }
+        } catch (Exception e) {
+            BazaarHelper.LOG.warn("Could not read price history, starting fresh", e);
+        }
+        return PriceHistory.empty();
+    }
+
+    /** Compact JSON (no pretty printing): this file holds a day of prices. */
+    public static void saveHistory(Path configDir, PriceHistory h) {
+        try {
+            Files.createDirectories(configDir);
+            Files.writeString(configDir.resolve("bazaarhelper-history.json"), new Gson().toJson(h));
+        } catch (Exception e) {
+            BazaarHelper.LOG.warn("Could not save price history", e);
+        }
+    }
+
     // ---------- desk book (live quotes, cost basis, P&L) ----------
 
     public static QuoteBook loadBook(Path configDir) {
@@ -90,7 +145,12 @@ public final class Config {
         try {
             if (Files.exists(f)) {
                 QuoteBook b = GSON.fromJson(Files.readString(f), QuoteBook.class);
-                if (b != null && b.items != null) return b;
+                if (b != null && b.items != null) {
+                    if (b.dailyRealized == null) b.dailyRealized = new java.util.LinkedHashMap<>();
+                    if (b.dailyVolume == null) b.dailyVolume = new java.util.LinkedHashMap<>();
+                    if (b.toClaim == null) b.toClaim = new java.util.LinkedHashMap<>();
+                    return b;
+                }
             }
         } catch (Exception e) {
             BazaarHelper.LOG.warn("Could not read desk book, starting fresh", e);

@@ -12,7 +12,14 @@ public final class QuickOrder {
     public enum Side { BUY, SELL }
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
-    public record Active(String itemName, Side side, double price, long amount, long createdAt) {}
+    /** PLACE: a new order. CANCEL: take down a live order (to re-price or pull it). */
+    public enum Mode { PLACE, CANCEL }
+
+    public record Active(String itemName, Side side, double price, long amount, long createdAt, Mode mode) {
+        public Active(String itemName, Side side, double price, long amount, long createdAt) {
+            this(itemName, side, price, amount, createdAt, Mode.PLACE);
+        }
+    }
 
     /** A started order goes stale after this, so an old price never gets typed in. */
     public static final long TTL_MS = 3 * 60 * 1000;
@@ -86,6 +93,18 @@ public final class QuickOrder {
         String t = BazaarData.stripFormatting(title == null ? "" : title).toLowerCase(Locale.US);
         boolean buy = a.side() == Side.BUY;
 
+        if (a.mode() == Mode.CANCEL) {
+            // Bazaar main page > Manage Orders > your order > Cancel Order
+            int c = find(names, "cancel order", false);
+            if (c < 0) c = find(names, "cancel offer", false);
+            if (c >= 0) return c;
+            if (OrderSync.isOrdersTitle(title)) {
+                String want = (buy ? "buy " : "sell ") + a.itemName().toLowerCase(Locale.US);
+                return find(names, want, true);
+            }
+            return find(names, "manage orders", false);
+        }
+
         if (t.contains("confirm")) {
             int i = find(names, buy ? "buy order" : "sell offer", false);
             return i >= 0 ? i : find(names, "confirm", false);
@@ -106,7 +125,7 @@ public final class QuickOrder {
         for (int i = 0; i < names.size(); i++) {
             String n = names.get(i);
             if (n == null) continue;
-            n = BazaarData.stripFormatting(n).toLowerCase(Locale.US).trim();
+            n = BazaarData.stripFormatting(n).replaceAll("[^\\x20-\\x7E]", "").replaceAll("\\s+", " ").toLowerCase(Locale.US).trim();
             if (exact ? n.equals(needle) : n.contains(needle)) return i;
         }
         return -1;

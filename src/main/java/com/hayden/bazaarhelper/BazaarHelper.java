@@ -13,12 +13,15 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -27,6 +30,8 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -42,6 +47,8 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -81,12 +88,15 @@ public final class BazaarHelper implements ClientModInitializer {
     private static volatile Planner.Book lastBook;
     /** Coin total the board was last opened with. */
     private static volatile double lastTotal = -1;
+    /** The mod's own price history (Hypixel's API has none), for the guard and fair value. */
+    public static PriceHistory HISTORY;
 
     @Override
     public void onInitializeClient() {
         configDir = FabricLoader.getInstance().getConfigDir();
         CONFIG = Config.load(configDir);
         DESK = Config.loadBook(configDir);
+        HISTORY = Config.loadHistory(configDir);
         CompletableFuture.runAsync(() -> {
             try { DATA.refreshNames(); } catch (Exception e) { LOG.warn("Item data load failed: {}", e.toString()); }
         });
@@ -103,6 +113,7 @@ public final class BazaarHelper implements ClientModInitializer {
             if (PanelKey.pressed()) openBoard();
             if (PanelKey.nextPressed()) startNext();
             if (++tickCount % 20 == 0) readPurse(client);
+            if (tickCount == 200 || tickCount % 72_000 == 0) warnKeyConflicts();
             autoRefreshTick();
         });
 
@@ -111,6 +122,13 @@ public final class BazaarHelper implements ClientModInitializer {
             addBazaarMenuButtons(screen);
             if (screen instanceof AbstractContainerScreen<?> cs && QuickOrder.isBazaarTitle(screen.getTitle().getString())) {
                 ScreenEvents.afterExtract(screen).register((s, g, mx, my, delta) -> highlightNextSlot(cs, g));
+                // B and N work inside Bazaar menus too (key presses go to the menu, not the key mapping)
+                ScreenKeyboardEvents.afterKeyPress(screen).register((s, e) -> {
+                    if (s.getFocused() instanceof EditBox) return; // typing in a search box
+                    if (PanelKey.isNext(e)) { closeMenu(); startNext(); }
+                    else if (PanelKey.isBoard(e)) { closeMenu(); openBoard(); }
+                });
+                if (OrderSync.isOrdersTitle(screen.getTitle().getString())) watchOrdersMenu(cs);
             }
         });
 
@@ -123,9 +141,150 @@ public final class BazaarHelper implements ClientModInitializer {
                 say(Component.literal("raw: " + text.replace("[Bazaar]", "<Bazaar>")).withStyle(ChatFormatting.DARK_GRAY));
             }
             if (text.startsWith("[Bazaar]") && text.contains(" Setup!")) QUICK.clear(); // order placed: stop highlighting
-            String note = DESK.onChat(text, CONFIG.taxPercent);
+            long now = System.currentTimeMillis();
+            String note = DESK.onChat(text, CONFIG.taxPercent, now);
+            QuoteBook.Event ev = DESK.lastEvent;
+            if (ev != null) {
+                onDeskEvent(ev);
+                Journal.append(configDir, now, ev);
+            }
             if (text.contains("[Bazaar]")) Config.saveBook(configDir, DESK);
             if (note != null && CONFIG.chatNotes) say(Component.literal(note).withStyle(ChatFormatting.GRAY));
+        });
+    }
+
+    // ---------- alerts ----------
+
+    private static void ping(boolean bad) {
+        if (!CONFIG.sounds) return;
+        try {
+            Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(
+                    bad ? SoundEvents.NOTE_BLOCK_BASS : SoundEvents.NOTE_BLOCK_PLING, bad ? 0.7f : 1.4f));
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Fills, cancels and claims from chat: sounds, room checks, and finishing a cancel. */
+    private static void onDeskEvent(QuoteBook.Event ev) {
+        switch (ev.kind()) {
+            case FILLED_BUY -> {
+                ping(false);
+                String id = DATA.idForName(ev.item());
+                int stack = id == null ? 64 : DATA.stackSize(id);
+                int need = (int) Math.ceil(ev.units() / Math.max(1, stack));
+                int free = scanInventory().freeSlots();
+                if (need > free) {
+                    say(Component.literal(String.format(Locale.US,
+                            "Not enough room to claim %s: needs %d slot%s, you have %d free. Make room first or it goes to your stash.",
+                            ev.item(), need, need == 1 ? "" : "s", free)).withStyle(ChatFormatting.RED));
+                }
+            }
+            case FILLED_SELL -> ping(false);
+            case CANCEL_BUY -> {
+                QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+                if (a != null && a.mode() == QuickOrder.Mode.CANCEL && a.side() == QuickOrder.Side.BUY) {
+                    DESK.clearBid(a.itemName());
+                    QUICK.clear();
+                    say(Component.literal("Bid on " + a.itemName() + " cancelled. Press N to do the next thing (re-bid if it's still worth it).")
+                            .withStyle(ChatFormatting.GREEN));
+                }
+            }
+            case CANCEL_SELL -> {
+                QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+                if (a != null && a.mode() == QuickOrder.Mode.CANCEL && a.side() == QuickOrder.Side.SELL) {
+                    QUICK.clear();
+                    say(Component.literal("Ask on " + ev.item() + " cancelled. Press N to list it again at the new price.")
+                            .withStyle(ChatFormatting.GREEN));
+                }
+            }
+            default -> {}
+        }
+    }
+
+    /** Keys already alerted, so each outbid or pull warning fires once until it clears. */
+    private static final Set<String> alerted = new HashSet<>();
+
+    /** After each price refresh: check every live quote against the new top of book and the guard. */
+    private static void checkAlerts() {
+        long now = System.currentTimeMillis();
+        Set<String> active = new HashSet<>();
+        for (Map.Entry<String, QuoteBook.Item> e : DESK.items.entrySet()) {
+            QuoteBook.Item it = e.getValue();
+            String id = DATA.idForName(e.getKey());
+            BazaarData.Product p = DATA.get(id);
+            if (p == null) continue;
+            String name = DATA.nameFor(id);
+            if (it.bidUnits > 0) {
+                Guard.Assessment g = assess(id, p, now);
+                if (g.pullBid()) {
+                    alert(active, id + ":pull", Component.literal("⚠ Pull your bid on " + name + ": " + g.reason() + ". Press N.")
+                            .withStyle(ChatFormatting.RED));
+                } else if (it.bidPrice + MarketMaker.TOLERANCE < p.topBid()) {
+                    alert(active, id + ":bid", Component.literal(String.format(Locale.US,
+                            "⚠ Outbid on %s: your bid %s, top bid now %s. Press N.",
+                            name, FlipMath.fmt(it.bidPrice), FlipMath.fmt(p.topBid()))).withStyle(ChatFormatting.GOLD));
+                }
+            }
+            if (it.askUnits > 0 && p.topAsk() > 0 && it.askPrice - MarketMaker.TOLERANCE > p.topAsk()) {
+                alert(active, id + ":ask", Component.literal(String.format(Locale.US,
+                        "⚠ Undercut on %s: your ask %s, top ask now %s. Press N.",
+                        name, FlipMath.fmt(it.askPrice), FlipMath.fmt(p.topAsk()))).withStyle(ChatFormatting.GOLD));
+            }
+        }
+        alerted.retainAll(active);
+    }
+
+    private static void alert(Set<String> active, String key, Component msg) {
+        active.add(key);
+        if (alerted.add(key)) {
+            say(msg);
+            ping(true);
+        }
+    }
+
+    private static void warnKeyConflicts() {
+        String c = PanelKey.conflicts();
+        if (c != null) {
+            say(Component.literal("Another control uses the same key as " + c
+                    + ", so it may not work outside menus. Rebind it in Options > Controls > Bazaar Helper.")
+                    .withStyle(ChatFormatting.YELLOW));
+        }
+    }
+
+    // ---------- Manage Orders sync ----------
+
+    /** Reads your orders off the Manage Orders menu once its items have loaded, and again if they change. */
+    private static void watchOrdersMenu(AbstractContainerScreen<?> screen) {
+        final int[] ticks = {0};
+        final String[] lastSig = {null};
+        ScreenEvents.afterTick(screen).register(s -> {
+            ticks[0]++;
+            if (ticks[0] < 6 || ticks[0] % 10 != 0) return; // let Hypixel fill the menu first
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null) return;
+            List<String> names = new ArrayList<>();
+            List<List<String>> lores = new ArrayList<>();
+            for (Slot slot : screen.getMenu().slots) {
+                if (slot.container == mc.player.getInventory()) continue;
+                ItemStack st = slot.getItem();
+                if (st.isEmpty()) continue;
+                names.add(st.getHoverName().getString());
+                List<String> lore = new ArrayList<>();
+                ItemLore il = st.get(DataComponents.LORE);
+                if (il != null) for (Component c : il.lines()) lore.add(c.getString());
+                lores.add(lore);
+            }
+            if (names.isEmpty()) return; // menu not filled yet
+            List<OrderSync.Order> orders = OrderSync.parseAll(names, lores);
+            String sig = orders.toString();
+            if (sig.equals(lastSig[0])) return;
+            boolean first = lastSig[0] == null;
+            lastSig[0] = sig;
+            String summary = DESK.syncFrom(orders, System.currentTimeMillis());
+            Config.saveBook(configDir, DESK);
+            if (first && CONFIG.chatNotes) say(Component.literal(summary).withStyle(ChatFormatting.GRAY));
+            if (CONFIG.debug) say(Component.literal("Orders menu: " + names.size() + " items, " + orders.size() + " orders")
+                    .withStyle(ChatFormatting.DARK_GRAY));
         });
     }
 
@@ -304,6 +463,54 @@ public final class BazaarHelper implements ClientModInitializer {
     private static volatile boolean refreshing = false;
     private static volatile long lastAutoAttempt = 0;
 
+    private static long lastHistorySave = 0;
+
+    /** Fetch prices, add them to the price history, and save the history now and then. */
+    static void refreshPrices() throws Exception {
+        DATA.refreshBazaar();
+        long now = System.currentTimeMillis();
+        double floor = CONFIG.minWeeklyUnits / 4.0;
+        Set<String> keep = new HashSet<>();
+        List<BazaarData.Product> liquid = new ArrayList<>();
+        for (BazaarData.Product p : DATA.products().values()) {
+            boolean onDesk = DESK.get(DATA.nameFor(p.id())) != null;
+            if (onDesk || Math.min(p.instaBuyWeek(), p.instaSellWeek()) >= floor) {
+                liquid.add(p);
+                keep.add(p.id());
+            }
+        }
+        synchronized (HISTORY) {
+            HISTORY.record(liquid, now);
+            HISTORY.retain(keep);
+            if (now - lastHistorySave > 10 * 60_000L) {
+                lastHistorySave = now;
+                Config.saveHistory(configDir, HISTORY);
+            }
+        }
+    }
+
+    public static void sayJournalPath() {
+        say(Component.literal("Journal file: " + configDir.resolve(Journal.FILE).toAbsolutePath()
+                + "  (in your Modrinth profile's config folder; opens in Excel or Google Sheets)").withStyle(ChatFormatting.GRAY));
+    }
+
+    /** Guard line for the item tooltip on the board. */
+    public static String guardInfo(String id) {
+        if (!CONFIG.guardOn) return "\n\nGuard off (Settings)";
+        Guard.Assessment g = assess(id, DATA.get(id), System.currentTimeMillis());
+        StringBuilder sb = new StringBuilder("\n\nGuard: ");
+        sb.append(g.reason().isEmpty() ? "clear" : g.reason());
+        if (!g.info().isEmpty()) sb.append("\n").append(g.info());
+        return sb.toString();
+    }
+
+    static Guard.Assessment assess(String id, BazaarData.Product p, long now) {
+        if (!CONFIG.guardOn || p == null) return Guard.Assessment.NONE;
+        List<PriceHistory.Sample> h;
+        synchronized (HISTORY) { h = HISTORY.samples(id); }
+        return Guard.assess(h, p, now, CONFIG.guardSettings());
+    }
+
     /** Prices refresh on their own every 20s while you're in a world, and an open board redraws. */
     private static final long REFRESH_MS = 20_000;
 
@@ -316,8 +523,9 @@ public final class BazaarHelper implements ClientModInitializer {
         refreshing = true;
         CompletableFuture.runAsync(() -> {
             try {
-                DATA.refreshBazaar();
+                refreshPrices();
                 Minecraft.getInstance().execute(() -> {
+                    checkAlerts();
                     if (BoardScreen.isOpen()) show(buildBoard(boardTotal()));
                 });
             } catch (Exception e) {
@@ -388,7 +596,7 @@ public final class BazaarHelper implements ClientModInitializer {
         say(Component.literal("Loading quote board...").withStyle(ChatFormatting.GRAY));
         CompletableFuture.runAsync(() -> {
             try {
-                DATA.refreshBazaar();
+                refreshPrices();
                 Minecraft.getInstance().execute(() -> pendingScreen = buildBoard(boardTotal()));
             } catch (Exception e) {
                 Minecraft.getInstance().execute(() -> say(Component.literal("Couldn't reach the Hypixel API: "
@@ -433,7 +641,7 @@ public final class BazaarHelper implements ClientModInitializer {
         return MarketMaker.quote(p, l.targetUnits(), inventory,
                 d == null ? 0 : (long) d.askUnits, d == null ? 0 : d.askPrice,
                 d == null ? 0 : (long) d.bidUnits, d == null ? 0 : d.bidPrice,
-                CONFIG.taxPercent, CONFIG.skewShare);
+                CONFIG.taxPercent, CONFIG.skewShare, assess(l.flip().id(), p, System.currentTimeMillis()));
     }
 
     private static BoardScreen buildBoard(double total) {
@@ -449,8 +657,13 @@ public final class BazaarHelper implements ClientModInitializer {
             rows.add(new BoardScreen.Row(l, name, inv.counts().getOrDefault(id, 0L), cands.get(i).quote(), d,
                     QuoteBook.markToMarket(d, DATA.get(id))));
         }
+        long now = System.currentTimeMillis();
+        String today = QuoteBook.day(now);
+        double toClaim = DESK.toClaim == null ? 0 : DESK.toClaim.size();
         return new BoardScreen(new BoardScreen.Header(book, inv.freeSlots(), DESK.realizedTotal, totalMtm(),
-                NextAction.pick(cands), NextAction.count(cands), DATA.lastUpdated()), rows);
+                NextAction.pick(cands, canPlace()), NextAction.count(cands), DATA.lastUpdated(),
+                DESK.realizedOn(today), DESK.liveOrders(), CONFIG.maxOrders, (int) toClaim,
+                DESK.volumeOn(today), CONFIG.dailyLimit, DESK.syncedAt), rows);
     }
 
     /**
@@ -461,7 +674,7 @@ public final class BazaarHelper implements ClientModInitializer {
         if (!CONFIG.setupDone) { show(new SettingsScreen(true)); return; }
         CompletableFuture.runAsync(() -> {
             try {
-                DATA.refreshBazaar();
+                refreshPrices();
             } catch (Exception e) {
                 Minecraft.getInstance().execute(() -> say(Component.literal("Couldn't reach the Hypixel API: "
                         + e.getMessage()).withStyle(ChatFormatting.RED)));
@@ -469,13 +682,16 @@ public final class BazaarHelper implements ClientModInitializer {
             }
             Minecraft.getInstance().execute(() -> {
                 Planner.Book book = buildBook(boardTotal());
-                NextAction.Pick p = NextAction.pick(candidates(book, scanInventory()));
+                NextAction.Pick p = NextAction.pick(candidates(book, scanInventory()), canPlace());
                 if (p == null) {
-                    say(Component.literal("✔ Nothing to do. All quotes are live.").withStyle(ChatFormatting.GREEN));
+                    say(Component.literal(canPlace() ? "✔ Nothing to do. All quotes are live."
+                            : "✔ Nothing to fix, and you're at your order cap (" + CONFIG.maxOrders + "). Wait for fills.")
+                            .withStyle(ChatFormatting.GREEN));
                     return;
                 }
                 switch (p.kind()) {
-                    case REPRICE_BID, REPRICE_ASK -> openBazaarFor(p.id());
+                    case PULL_BID, REPRICE_BID -> startCancel(p.id(), QuickOrder.Side.BUY, p.kind() == NextAction.Kind.PULL_BID);
+                    case REPRICE_ASK -> startCancel(p.id(), QuickOrder.Side.SELL, false);
                     case PLACE_BID -> sendQuote(p.id(), QuickOrder.Side.BUY);
                     case PLACE_ASK -> sendQuote(p.id(), QuickOrder.Side.SELL);
                 }
@@ -484,6 +700,32 @@ public final class BazaarHelper implements ClientModInitializer {
     }
 
     // ---------- orders ----------
+
+    public static void openJournal() {
+        show(new JournalScreen());
+    }
+
+    /** Room for another order under Hypixel's cap. */
+    static boolean canPlace() {
+        return DESK.liveOrders() < CONFIG.maxOrders;
+    }
+
+    /**
+     * Take down a live order (to re-price it, or pull it when the guard says so). Sends one /bz,
+     * then the green slots lead through Manage Orders > your order > Cancel Order.
+     */
+    public static void startCancel(String id, QuickOrder.Side side, boolean pull) {
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (conn == null) return;
+        String name = DATA.nameFor(id);
+        QUICK.start(new QuickOrder.Active(name, side, 0, 0, System.currentTimeMillis(), QuickOrder.Mode.CANCEL));
+        conn.sendCommand("bz");
+        String what = side == QuickOrder.Side.BUY ? "bid" : "ask";
+        say(Component.literal((pull ? "Pull your " : "Re-price your ") + what + " on " + name + ": ")
+                .withStyle(pull ? ChatFormatting.RED : ChatFormatting.GOLD)
+                .append(Component.literal("click the green slots (Manage Orders > your order > Cancel). Then N "
+                        + (pull ? "moves on." : "puts it back up at the new price.")).withStyle(ChatFormatting.GRAY)));
+    }
 
     /**
      * One board click: re-check live prices and your inventory, recompute the quote, then send
@@ -494,7 +736,7 @@ public final class BazaarHelper implements ClientModInitializer {
         say(Component.literal("Checking live price...").withStyle(ChatFormatting.GRAY));
         CompletableFuture.runAsync(() -> {
             try {
-                DATA.refreshBazaar();
+                refreshPrices();
             } catch (Exception e) {
                 Minecraft.getInstance().execute(() -> say(Component.literal("Couldn't reach the Hypixel API: "
                         + e.getMessage()).withStyle(ChatFormatting.RED)));
@@ -514,6 +756,11 @@ public final class BazaarHelper implements ClientModInitializer {
         String name = DATA.nameFor(id);
         long have = scanInventory().counts().getOrDefault(id, 0L);
         MarketMaker.Quote q = quoteFor(line, have);
+        if (!canPlace()) {
+            say(Component.literal("You're at your order cap (" + CONFIG.maxOrders + " open orders). Wait for a fill or cancel one first.")
+                    .withStyle(ChatFormatting.YELLOW));
+            return;
+        }
 
         double price;
         long amount;
@@ -539,6 +786,13 @@ public final class BazaarHelper implements ClientModInitializer {
         QUICK.start(new QuickOrder.Active(name, side, price, amount, System.currentTimeMillis()));
         conn.sendCommand("bz " + name);
 
+        String today = QuoteBook.day(System.currentTimeMillis());
+        double orderCoins = side == QuickOrder.Side.BUY ? price * amount : price * have;
+        if (DESK.volumeOn(today) + orderCoins > CONFIG.dailyLimit) {
+            say(Component.literal("Heads up: this order would take you past your daily Bazaar limit ("
+                    + FlipMath.fmt(DESK.volumeOn(today)) + " of " + FlipMath.fmt(CONFIG.dailyLimit) + " used today).")
+                    .withStyle(ChatFormatting.YELLOW));
+        }
         if (side == QuickOrder.Side.BUY) {
             say(Component.literal("Bid " + name + " (" + q.state().name().toLowerCase(Locale.US) + "): ").withStyle(ChatFormatting.GREEN)
                     .append(Component.literal(String.format(Locale.US,
@@ -550,15 +804,6 @@ public final class BazaarHelper implements ClientModInitializer {
                             "click the green slots. Price %s gets typed in. Lists your %,d.",
                             QuickOrder.formatPrice(price), have)).withStyle(ChatFormatting.GRAY)));
         }
-    }
-
-    /** For outbid quotes: open the item so you can re-price from Your Orders (Bazaar Utils). */
-    public static void openBazaarFor(String id) {
-        ClientPacketListener conn = Minecraft.getInstance().getConnection();
-        if (conn == null) return;
-        conn.sendCommand("bz " + DATA.nameFor(id));
-        say(Component.literal("Re-price from Your Orders with Bazaar Utils' sign button, then B to come back.")
-                .withStyle(ChatFormatting.GRAY));
     }
 
     // ---------- commands ----------
@@ -613,6 +858,13 @@ public final class BazaarHelper implements ClientModInitializer {
                 .then(setter("minunits", "units", v -> CONFIG.minWeeklyUnits = v, 0, 1e10, "Min weekly units"))
                 .then(setter("minmargin", "percent", v -> CONFIG.minMarginPct = v, 0, 100, "Min margin %"))
                 .then(setter("crowdweight", "weight", v -> CONFIG.crowdWeight = v, 0, 5, "Crowd weight"))
+                .then(setter("dailylimit", "coins", v -> CONFIG.dailyLimit = v, 1e6, 1e13, "Daily limit"))
+                .then(setter("drop", "percent", v -> CONFIG.guardDropPct = v, 0.5, 50, "Pull bids on a drop of (%)"))
+                .then(setter("deviation", "percent", v -> CONFIG.guardDeviationPct = v, 1, 100, "Max % above average"))
+                .then(setter("fairhours", "hours", v -> CONFIG.fairHours = v, 1, 24, "Fair value hours"))
+                .then(setter("volk", "factor", v -> CONFIG.volK = v, 0, 5, "Edge per % swing"))
+                .then(intSetter("maxorders", 1, 100, v -> CONFIG.maxOrders = v, "Max open orders"))
+                .then(literal("journal").executes(c -> { openJournal(); return 1; }))
                 .then(intSetter("slots", 1, MAIN_SLOTS, v -> CONFIG.slotBudget = v, "Slot budget"))
                 .then(intSetter("maxitems", 1, 30, v -> CONFIG.maxItems = v, "Max items"))
                 .then(intSetter("maxcrowd", 1, 1000, v -> CONFIG.maxCrowd = v, "Max crowd"))
@@ -661,7 +913,7 @@ public final class BazaarHelper implements ClientModInitializer {
         reply(c, "Fetching Bazaar prices...", true);
         CompletableFuture.runAsync(() -> {
             try {
-                DATA.refreshBazaar();
+                refreshPrices();
                 Minecraft.getInstance().execute(action);
             } catch (Exception e) {
                 LOG.warn("Bazaar refresh failed", e);
@@ -688,6 +940,9 @@ public final class BazaarHelper implements ClientModInitializer {
                 "/bzh minflow <25m>  min daily coin flow (thinner side)",
                 "/bzh minunits <20k>  min units traded per WEEK (thinner side)",
                 "/bzh tax, total, reserve, maxitem, maxitems, minmargin, maxcrowd, crowdweight",
+                "/bzh journal  P&L by day and item  |  /bzh maxorders <14>  |  /bzh dailylimit <15b>",
+                "/bzh drop <3>  pull bids on a % drop in 30 min  |  /bzh deviation <8>  max % above average",
+                "/bzh fairhours <6>  fair value window  |  /bzh volk <0.25>  extra edge per % of price swing",
                 "/bzh debug  print screens, signs and Bazaar chat lines",
         };
         c.getSource().sendFeedback(Component.literal("Bazaar Helper").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
