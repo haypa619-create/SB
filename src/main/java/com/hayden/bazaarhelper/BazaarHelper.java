@@ -113,11 +113,16 @@ public final class BazaarHelper implements ClientModInitializer {
             if (PanelKey.pressed()) openTab(DeskScreen.lastTab());
             if (PanelKey.nextPressed()) startNext();
             if (++tickCount % 20 == 0) readPurse(client);
+            guideTick(client);
             if (!keysChecked && client.player != null && tickCount % 100 == 0) { keysChecked = true; warnKeyConflicts(); }
             autoRefreshTick();
         });
 
         ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
+            if (isGuideScreen(screen)) {
+                QUICK.inMenus();
+                ScreenEvents.remove(screen).register(s -> QUICK.leftMenus(System.currentTimeMillis()));
+            }
             onScreenOpened(screen);
             addBazaarMenuButtons(screen);
             if (screen instanceof AbstractContainerScreen<?> cs && QuickOrder.isBazaarTitle(screen.getTitle().getString())) {
@@ -141,6 +146,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 say(Component.literal("raw: " + text.replace("[Bazaar]", "<Bazaar>")).withStyle(ChatFormatting.DARK_GRAY));
             }
             if (text.startsWith("[Bazaar]") && text.contains(" Setup!")) QUICK.clear(); // order placed: stop highlighting
+            finishCancelFromChat(text);
             long now = System.currentTimeMillis();
             String note = DESK.onChat(text, CONFIG.taxPercent, now);
             QuoteBook.Event ev = DESK.lastEvent;
@@ -359,6 +365,14 @@ public final class BazaarHelper implements ClientModInitializer {
             String summary = DESK.syncFrom(orders, System.currentTimeMillis());
             QuickOrder.Active qa = QUICK.current(System.currentTimeMillis());
             if (qa != null && qa.mode() == QuickOrder.Mode.ORDERS) QUICK.clear();
+            // A cancel is done once the order is gone from the menu, whatever chat said (other mods rewrite it).
+            if (qa != null && qa.mode() == QuickOrder.Mode.CANCEL && !OrderSync.hasOpen(orders, qa.itemName(), qa.side())) {
+                QUICK.clear();
+                rememberRequote(qa.itemName(), qa.side());
+                say(Component.literal((qa.side() == QuickOrder.Side.BUY ? "Bid" : "Ask") + " on " + qa.itemName()
+                        + " is down. Press N for the next thing" + (cancelRequotes ? " (puts it back up at the new price)." : "."))
+                        .withStyle(ChatFormatting.GREEN));
+            }
             Config.saveBook(configDir, DESK);
             if (first && CONFIG.chatNotes) say(Component.literal(summary).withStyle(ChatFormatting.GRAY));
             if (CONFIG.debug) say(Component.literal("Orders menu: " + names.size() + " items, " + orders.size() + " orders")
@@ -579,6 +593,14 @@ public final class BazaarHelper implements ClientModInitializer {
                 .bounds(70, 4, 62, 20)
                 .tooltip(Tooltip.create(Component.literal("Do the next most urgent thing on your board (N)")))
                 .build());
+        if (QUICK.current(System.currentTimeMillis()) != null) {
+            Screens.getWidgets(screen).add(Button.builder(
+                            Component.literal("✕ Stop").withStyle(ChatFormatting.GRAY),
+                            b -> { stopGuide(); b.visible = false; })
+                    .bounds(136, 4, 50, 20)
+                    .tooltip(Tooltip.create(Component.literal("Stop the green-slot guide for this order")))
+                    .build());
+        }
     }
 
     /**
@@ -616,6 +638,45 @@ public final class BazaarHelper implements ClientModInitializer {
         String hint = (a.side() == QuickOrder.Side.BUY ? "Bid " : "Ask ") + a.itemName() + ": click the green slot";
         g.centeredText(mc.font, Component.literal(hint).withStyle(ChatFormatting.GREEN),
                 screen.width / 2, 8, 0xFFFFFFFF);
+    }
+
+    /**
+     * Ends a cancel from any "order cancelled" chat line, including ones other mods rewrite
+     * (e.g. "[SkyHanni] Bazaar buy order cancelled").
+     */
+    private static void finishCancelFromChat(String text) {
+        QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+        if (a == null || a.mode() != QuickOrder.Mode.CANCEL) return;
+        String t = BazaarData.stripFormatting(text).toLowerCase(Locale.US);
+        boolean buy = a.side() == QuickOrder.Side.BUY;
+        boolean match = t.contains("cancel") && (buy ? t.contains("buy order") : t.contains("sell offer"));
+        if (!match) return;
+        QUICK.clear();
+        if (buy) DESK.clearBid(a.itemName()); else DESK.clearAsk(a.itemName());
+        rememberRequote(a.itemName(), a.side());
+        say(Component.literal((buy ? "Bid" : "Ask") + " on " + a.itemName() + " is down. Press N for the next thing"
+                + (cancelRequotes ? " (puts it back up at the new price)." : ".")).withStyle(ChatFormatting.GREEN));
+    }
+
+    /** Bazaar menus and signs are where the green-slot guide lives. */
+    private static boolean isGuideScreen(Screen screen) {
+        return screen instanceof AbstractSignEditScreen
+                || screen instanceof AbstractContainerScreen<?> && QuickOrder.isBazaarTitle(screen.getTitle().getString());
+    }
+
+    /** Ends the guide once you've left the Bazaar (closed the menu), so it never points at stale slots. */
+    private static void guideTick(Minecraft mc) {
+        long now = System.currentTimeMillis();
+        if (mc.screen != null && isGuideScreen(mc.screen)) { QUICK.inMenus(); return; }
+        if (QUICK.abandoned(now)) {
+            QUICK.clear();
+            if (CONFIG.chatNotes) say(Component.literal("Guide stopped (you closed the Bazaar).").withStyle(ChatFormatting.DARK_GRAY));
+        }
+    }
+
+    private static void stopGuide() {
+        QUICK.clear();
+        say(Component.literal("Guide stopped.").withStyle(ChatFormatting.DARK_GRAY));
     }
 
     private static void closeMenu() {

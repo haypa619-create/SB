@@ -269,6 +269,11 @@ public final class QuoteBook {
         if (it != null) { it.bidUnits = 0; it.askUnits = 0; it.bidSetAt = 0; it.askSetAt = 0; it.bidOrders = 0; it.askOrders = 0; }
     }
 
+    public void clearAsk(String itemName) {
+        Item it = get(itemName);
+        if (it != null) { it.askUnits = 0; it.askSetAt = 0; it.askOrders = 0; }
+    }
+
     public void clearBid(String itemName) {
         Item it = get(itemName);
         if (it != null) { it.bidUnits = 0; it.bidSetAt = 0; it.bidOrders = 0; }

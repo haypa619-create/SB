@@ -76,6 +76,14 @@ public final class OrderSync {
         return out;
     }
 
+    /** Whether the menu still shows an open order for this item and side. */
+    public static boolean hasOpen(List<Order> orders, String itemName, QuickOrder.Side side) {
+        for (Order o : orders) {
+            if (o.side() == side && o.open() > 0 && o.itemName().equalsIgnoreCase(itemName.trim())) return true;
+        }
+        return false;
+    }
+
     private static String clean(String s) {
         return BazaarData.stripFormatting(s).replaceAll("[^\\x20-\\x7E]", "").trim();
     }

@@ -26,7 +26,26 @@ public final class QuickOrder {
 
     private volatile Active active;
 
-    public void start(Active a) { active = a; }
+    public void start(Active a) {
+        active = a;
+        gapSince = 0;
+    }
+
+    /**
+     * When you left the Bazaar menus (0 = you're in them, or haven't opened them yet). Hypixel
+     * briefly closes the menu between a menu and a sign, so the guide only ends after GAP_MS.
+     */
+    private volatile long gapSince = 0;
+    public static final long GAP_MS = 2000;
+
+    public void leftMenus(long now) { if (active != null && gapSince == 0) gapSince = now; }
+
+    public void inMenus() { gapSince = 0; }
+
+    /** True once you've been out of the Bazaar for GAP_MS: the guide should end. */
+    public boolean abandoned(long now) {
+        return active != null && gapSince > 0 && now - gapSince > GAP_MS;
+    }
 
     public void clear() { active = null; }
 

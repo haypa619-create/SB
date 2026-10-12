@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1
+- Fix: the green-slot guide ends when you close the Bazaar (it kept pointing at Manage Orders)
+- Fix: a cancel finishes when the order is gone from Manage Orders, or on any "order cancelled" chat line, including SkyHanni's rewritten one
+- ✕ Stop button next to ← Board / Next ▶ while a guide is running
+
 ## 0.11.0
 - Tabbed desk: Quotes, Orders, Positions, Market, Journal, Alerts, Settings. Number keys 1-7 switch tabs; B reopens your last tab
 - Orders tab: every open order with on top / shared / outbid / pull status, age, and Re-price / Cancel / Pull buttons; Sync / claim highlights Manage Orders
