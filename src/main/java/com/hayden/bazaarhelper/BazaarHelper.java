@@ -697,6 +697,6 @@ public final class BazaarHelper implements ClientModInitializer {
     static void say(Component msg) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
-        mc.player.displayClientMessage(Component.literal("[BzH] ").withStyle(ChatFormatting.GOLD).append(msg), false);
+        mc.player.sendSystemMessage(Component.literal("[BzH] ").withStyle(ChatFormatting.GOLD).append(msg));
     }
 }
