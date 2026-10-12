@@ -16,19 +16,12 @@ jobs:
       - name: Probe
         run: |
           set +e +o pipefail
+          MC=/home/runner/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.2/minecraft-merged-deobf-26.2.jar
           out=probe.txt; : > $out
-          find ~/.gradle -name "*.jar" | grep -iE "minecraft|screen-api" | head -20 >> $out
-          SCREEN=$(find ~/.gradle /home/runner/work -name 'fabric-screen-api-v1*.jar' 2>/dev/null | grep -v sources | head -1)
-          echo "screenjar $SCREEN" >> $out
-          javap -cp "$SCREEN" 'net.fabricmc.fabric.api.client.screen.v1.ScreenEvents' >> $out 2>&1
-          for c in $(unzip -l "$SCREEN" | grep -o 'net/fabricmc/fabric/api/client/screen/v1/ScreenEvents\$[A-Za-z]*\.class'); do
-            javap -cp "$SCREEN" "${c%.class}" >> $out 2>&1; done
-          MC=$(find ~/.gradle /home/runner/work -name '*.jar' 2>/dev/null | xargs -I{} sh -c 'unzip -l {} 2>/dev/null | grep -q "net/minecraft/client/gui/screens/inventory/AbstractContainerScreen.class" && echo {}' | head -1)
-          echo "mcjar $MC" >> $out
-          javap -p -cp "$MC" net.minecraft.client.gui.screens.inventory.AbstractContainerScreen | grep -iE "leftPos|topPos|hoveredSlot|imageWidth|render|extract|Slot" >> $out 2>&1
-          javap -cp "$MC" net.minecraft.world.inventory.Slot | grep -E " x;| y;|getItem|isActive|index" >> $out 2>&1
-          unzip -l "$MC" | grep -oE 'net/minecraft/client/gui/GuiGraphics[A-Za-z]*\.class' >> $out
-          for g in GuiGraphics GuiGraphicsExtractor; do javap -cp "$MC" net.minecraft.client.gui.$g 2>/dev/null | grep -E "fill|renderOutline|submitOutline|outline|pose" >> $out; done
-          javap -cp "$MC" net.minecraft.client.gui.screens.Screen | grep -iE "render|extract" >> $out
-          msg=$(head -c 60000 $out | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-          echo "::warning title=probe::$msg"
+          javap -p -cp "$MC" net.minecraft.client.gui.screens.inventory.AbstractContainerScreen | grep -iE "leftPos|topPos|hoveredSlot|imageWidth|extract|Slot|menu" >> $out
+          javap -cp "$MC" net.minecraft.world.inventory.Slot | grep -E "int x|int y|getItem|isActive|container|index" >> $out
+          javap -cp "$MC" net.minecraft.world.inventory.AbstractContainerMenu | grep -E "slots" >> $out
+          javap -cp "$MC" net.minecraft.client.gui.GuiGraphicsExtractor | grep -iE "fill|outline|text|pose" >> $out
+          javap -cp "$MC" net.minecraft.world.item.ItemStack | grep -iE "getHoverName|isEmpty|getCustomName" >> $out
+          split -b 3500 $out part_
+          for f in part_*; do msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' $f); echo "::warning title=probe $f::$msg"; done
