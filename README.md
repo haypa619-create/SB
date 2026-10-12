@@ -26,7 +26,7 @@ No commands needed after that.
 | **B** | Open the quote board |
 | **N** | Do the next most urgent thing |
 | **← Board** / **Next ▶** | Top-left of every Bazaar menu: back to the board, or straight to the next thing |
-| **Bid / Ask @ price** | Place that quote: runs `/bz <item>`, fills in the signs |
+| **Bid / Ask @ price** | Place that quote: runs `/bz <item>`, outlines each slot to click in green, fills in the signs |
 | **⚠ outbid** | Open the item to re-price from Your Orders (Bazaar Utils' sign button) |
 | **✕** | Remove an item from the book |
 | **Settings** | Every setting as buttons |
@@ -97,6 +97,7 @@ To move to a newer Minecraft version, update `gradle.properties` from https://fa
 | Signs don't fill in | `/bzh debug`, open a Custom Amount and a Custom Price sign, and send the `Sign lines:` output. Patterns are in `QuickOrder.classify()`. |
 | Quotes never show live, or P&L doesn't move | `/bzh debug`, place and claim one order, and send the `raw:` lines. Patterns are at the top of `QuoteBook.java`. |
 | Board shows quotes you cancelled | Settings > Reset quote tracking. Cancelled buy orders aren't named in chat. |
+| No green slot in a Bazaar menu | `/bzh debug` prints menu titles. Slot names are matched in `QuickOrder.pickSlot()`. |
 | No ← Board button in a Bazaar menu | `/bzh debug` prints menu titles. Add the missing one in `QuickOrder.isBazaarTitle()`. |
 | Lots of idle coins | Give it more slots, lower stock hours, or lower min weekly units. |
 

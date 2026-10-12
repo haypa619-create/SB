@@ -1,5 +1,6 @@
 package com.hayden.bazaarhelper;
 
+import com.hayden.bazaarhelper.mixin.ContainerScreenAccessor;
 import com.hayden.bazaarhelper.mixin.SignEditAccessor;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -16,6 +17,7 @@ import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
@@ -26,6 +28,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import org.slf4j.Logger;
@@ -100,6 +103,9 @@ public final class BazaarHelper implements ClientModInitializer {
         ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
             onScreenOpened(screen);
             addBazaarMenuButtons(screen);
+            if (screen instanceof AbstractContainerScreen<?> cs && QuickOrder.isBazaarTitle(screen.getTitle().getString())) {
+                ScreenEvents.afterExtract(screen).register((s, g, mx, my, delta) -> highlightNextSlot(cs, g));
+            }
         });
 
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
@@ -110,6 +116,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 LOG.info("Bazaar chat: {}", text);
                 say(Component.literal("raw: " + text.replace("[Bazaar]", "<Bazaar>")).withStyle(ChatFormatting.DARK_GRAY));
             }
+            if (text.startsWith("[Bazaar]") && text.contains(" Setup!")) QUICK.clear(); // order placed: stop highlighting
             String note = DESK.onChat(text, CONFIG.taxPercent);
             if (text.contains("[Bazaar]")) Config.saveBook(configDir, DESK);
             if (note != null && CONFIG.chatNotes) say(Component.literal(note).withStyle(ChatFormatting.GRAY));
@@ -165,6 +172,43 @@ public final class BazaarHelper implements ClientModInitializer {
                 .bounds(70, 4, 62, 20)
                 .tooltip(Tooltip.create(Component.literal("Do the next most urgent thing on your board (N)")))
                 .build());
+    }
+
+    /**
+     * Outlines the menu slot to click next for the order you started from the board
+     * (the item, then Create Buy Order / Create Sell Offer, Custom Amount, Custom Price,
+     * confirm). Drawing only: you still do every click.
+     */
+    private static void highlightNextSlot(AbstractContainerScreen<?> screen, GuiGraphicsExtractor g) {
+        QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+        if (a == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        List<Slot> slots = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        for (Slot slot : screen.getMenu().slots) {
+            if (slot.container == mc.player.getInventory()) continue; // menu slots only
+            slots.add(slot);
+            ItemStack st = slot.getItem();
+            names.add(st.isEmpty() ? null : st.getHoverName().getString());
+        }
+        int i = QuickOrder.pickSlot(screen.getTitle().getString(), names, a);
+        if (i < 0) return;
+
+        ContainerScreenAccessor acc = (ContainerScreenAccessor) screen;
+        int x = acc.bazaarhelper$getLeftPos() + slots.get(i).x;
+        int y = acc.bazaarhelper$getTopPos() + slots.get(i).y;
+        // Pulse between bright and soft green so it catches the eye.
+        double t = (System.currentTimeMillis() % 1000) / 1000.0;
+        int alpha = 0x60 + (int) (0x50 * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI)));
+        g.fill(x, y, x + 16, y + 16, (alpha << 24) | 0x55FF55);
+        g.outline(x - 2, y - 2, 20, 20, 0xFF55FF55);
+        g.outline(x - 1, y - 1, 18, 18, 0xFF55FF55);
+
+        String hint = (a.side() == QuickOrder.Side.BUY ? "Bid " : "Ask ") + a.itemName() + ": click the green slot";
+        g.centeredText(mc.font, Component.literal(hint).withStyle(ChatFormatting.GREEN),
+                screen.width / 2, 8, 0xFFFFFFFF);
     }
 
     private static void closeMenu() {
@@ -423,12 +467,12 @@ public final class BazaarHelper implements ClientModInitializer {
         if (side == QuickOrder.Side.BUY) {
             say(Component.literal("Bid " + name + " (" + q.state().name().toLowerCase(Locale.US) + "): ").withStyle(ChatFormatting.GREEN)
                     .append(Component.literal(String.format(Locale.US,
-                            "Create Buy Order > Custom Amount (%,d filled in) > Custom Price (%s filled in) > confirm",
+                            "click the green slots. Amount %,d and price %s get typed in for you.",
                             amount, QuickOrder.formatPrice(price))).withStyle(ChatFormatting.GRAY)));
         } else {
             say(Component.literal("Ask " + name + " (" + q.state().name().toLowerCase(Locale.US) + "): ").withStyle(ChatFormatting.AQUA)
                     .append(Component.literal(String.format(Locale.US,
-                            "Create Sell Offer > Custom Price (%s filled in) > confirm. Lists your %,d.",
+                            "click the green slots. Price %s gets typed in. Lists your %,d.",
                             QuickOrder.formatPrice(price), have)).withStyle(ChatFormatting.GRAY)));
         }
     }

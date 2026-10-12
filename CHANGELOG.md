@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+- After you click Bid or Ask on the board, every Bazaar menu outlines the slot to click next in pulsing green: the item, Create Buy Order / Create Sell Offer, Custom Amount, Custom Price, then confirm
+- The highlight stops once the order is set up
+
 ## 0.7.0
 - First-run setup screen and a Settings screen: every setting is a button, no commands needed
 - Next: one button, the N hotkey, or the Next button in Bazaar menus does the most urgent thing on the board (re-price outbid, unload long, rebuild short, then list and bid)

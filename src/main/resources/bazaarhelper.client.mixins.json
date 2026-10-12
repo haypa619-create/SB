@@ -3,7 +3,8 @@
   "package": "com.hayden.bazaarhelper.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
-    "SignEditAccessor"
+    "SignEditAccessor",
+    "ContainerScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
