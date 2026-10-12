@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "bazaarhelper",
+  "version": "${version}",
+  "name": "Bazaar Helper",
+  "description": "Hypixel SkyBlock Bazaar market-making desk: slot-aware book, two-sided quote board with inventory skew, P&L. One click = one action; you confirm every order.",
+  "authors": [
+    "Hayden Panichelli"
+  ],
+  "license": "MIT",
+  "icon": "assets/bazaarhelper/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.hayden.bazaarhelper.BazaarHelper"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "bazaarhelper.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

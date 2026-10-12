@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.hayden.bazaarhelper.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "SignEditAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

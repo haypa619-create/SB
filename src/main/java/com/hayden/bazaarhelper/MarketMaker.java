@@ -1,0 +1,94 @@
+package com.hayden.bazaarhelper;
+
+/**
+ * Works out what your two-sided quote on one item should be right now. Pure logic.
+ *
+ * Position = stock in your inventory + units sitting in your live sell offer.
+ *   SHORT    (position < 0.5 x target): bid sharper to rebuild stock
+ *   BALANCED                           : bid top + 0.1, ask top - 0.1
+ *   LONG     (position > 1.5 x target): stop bidding, ask sharper to unload
+ *
+ * Bid size tops you up toward 2 x target counting what you hold and what's already bidding.
+ * Ask size is whatever stock you hold (a Bazaar sell offer lists all of that item you carry).
+ */
+public final class MarketMaker {
+    public enum State { SHORT, BALANCED, LONG }
+    public enum Action { PLACE, LIVE, OUTBID, HOLD, EMPTY }
+
+    public static final double SHORT_BAND = 0.5;
+    public static final double LONG_BAND = 1.5;
+    /** Price gap treated as "still on top", allows for rounding in chat totals. */
+    public static final double TOLERANCE = 0.05;
+
+    private MarketMaker() {}
+
+    public record Quote(State state, long position, double bidPrice, long bidSize, Action bidAction,
+                        double askPrice, long askSize, Action askAction, String note) {}
+
+    /**
+     * @param target        target stock from the plan
+     * @param inventory     units of this item in your inventory now
+     * @param liveAskUnits  units in your live sell offer (0 if none)
+     * @param liveAskPrice  its price
+     * @param liveBidUnits  units in your live buy order (0 if none)
+     * @param liveBidPrice  its price
+     * @param skewShare     share of the spread to lean by when SHORT or LONG (e.g. 0.25)
+     */
+    public static Quote quote(BazaarData.Product p, long target, long inventory,
+                              long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
+                              double taxPct, double skewShare) {
+        long position = inventory + liveAskUnits;
+        State state = position < target * SHORT_BAND ? State.SHORT
+                : position > target * LONG_BAND ? State.LONG : State.BALANCED;
+
+        double topBid = p.topBid(), topAsk = p.topAsk();
+        String note = "";
+
+        // ---- prices ----
+        double bidPrice = FlipMath.round1(topBid + FlipMath.TICK);
+        double askPrice = FlipMath.round1(topAsk - FlipMath.TICK);
+        double skew = (topBid > 0 && topAsk > 0) ? FlipMath.round1(Math.max(0, (topAsk - topBid) * skewShare)) : 0;
+        if (state == State.SHORT) bidPrice = FlipMath.round1(bidPrice + skew);
+        if (state == State.LONG) askPrice = FlipMath.round1(askPrice - skew);
+        // never cross the book after skewing
+        if (topAsk > 0 && bidPrice > topAsk - 2 * FlipMath.TICK) bidPrice = FlipMath.round1(topAsk - 2 * FlipMath.TICK);
+        if (topBid > 0 && askPrice < topBid + 2 * FlipMath.TICK) askPrice = FlipMath.round1(topBid + 2 * FlipMath.TICK);
+        boolean profitable = topBid > 0 && topAsk > 0 && askPrice * (1 - taxPct / 100.0) > bidPrice;
+
+        // ---- bid side ----
+        long bidSize = 0;
+        Action bidAction;
+        if (liveBidUnits > 0) {
+            bidAction = liveBidPrice + TOLERANCE < topBid ? Action.OUTBID : Action.LIVE;
+        } else if (topBid <= 0 || topAsk <= 0) {
+            bidAction = Action.HOLD;
+            note = "one side of the book is empty";
+        } else if (state == State.LONG) {
+            bidAction = Action.HOLD;
+            note = "long: stop bidding, sell down";
+        } else if (!profitable) {
+            bidAction = Action.HOLD;
+            note = "spread closed after tax";
+        } else {
+            bidSize = Math.max(0, Math.min(2 * target - position, Planner.MAX_ORDER_UNITS));
+            bidAction = bidSize > 0 ? Action.PLACE : Action.HOLD;
+        }
+
+        // ---- ask side ----
+        Action askAction;
+        if (liveAskUnits > 0) {
+            askAction = topAsk > 0 && liveAskPrice - TOLERANCE > topAsk ? Action.OUTBID : Action.LIVE;
+        } else if (inventory > 0 && topAsk > 0) {
+            askAction = Action.PLACE;
+        } else if (inventory > 0) {
+            askAction = Action.PLACE;
+            askPrice = FlipMath.round1(Math.max(askPrice, topBid * 1.03)); // no asks to undercut: list 3% over bid
+            note = note.isEmpty() ? "no sell offers on the book" : note;
+        } else {
+            askAction = Action.EMPTY;
+        }
+        if (state == State.SHORT && note.isEmpty()) note = "short: bidding sharper to rebuild stock";
+
+        return new Quote(state, position, bidPrice, bidSize, bidAction, askPrice, inventory, askAction, note);
+    }
+}
