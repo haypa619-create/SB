@@ -78,7 +78,7 @@ public final class SettingsScreen extends DeskScreen {
         stepper(right, ry, colW, "Max items", "Most items quoted at once. Each uses a buy order and a sell offer.",
                 () -> c.maxItems, d -> c.maxItems = (int) clamp(c.maxItems + d, 1, 30), v -> Integer.toString((int) v));
         ry += ROW_H;
-        stepper(right, ry, colW, "Skew", "Share of the spread to lean by when long or short.",
+        stepper(right, ry, colW, "Skew", "Share of the spread to lean by when long or short.\nNever more than 2% past the best price (/bzh maxskew to change).",
                 () -> c.skewShare, d -> c.skewShare = clamp(Math.round((c.skewShare + d * 0.05) * 100) / 100.0, 0, 0.9),
                 v -> String.format(Locale.US, "%.2f", v));
         ry += ROW_H;

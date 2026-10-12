@@ -31,7 +31,7 @@ public final class QuoteBook {
         public int bidOrders, askOrders;
     }
 
-    public enum EventKind { SETUP_BUY, SETUP_SELL, FILLED_BUY, FILLED_SELL, CLAIM_BUY, CLAIM_SELL, CANCEL_BUY, CANCEL_SELL }
+    public enum EventKind { SETUP_BUY, SETUP_SELL, FILLED_BUY, FILLED_SELL, CLAIM_BUY, CLAIM_SELL, CANCEL_BUY, CANCEL_SELL, REJECTED }
 
     /** What the last chat line did, for alerts and the journal. Not saved. */
     public record Event(EventKind kind, String item, double units, double price, double pnl, double fillSecs) {}
@@ -63,6 +63,8 @@ public final class QuoteBook {
     // [Bazaar] Cancelled! Refunded 20,832.0 coins from cancelling Buy Order!  (doesn't name the item)
     static final Pattern CANCELLED_BUY = Pattern.compile(
             "^\\[Bazaar\\] Cancelled! Refunded ([\\d,.]+) coins? from cancelling Buy Order!.*$");
+    // [Bazaar] Your price isn't competitive enough with the best order/offer's price.
+    static final Pattern REJECTED = Pattern.compile("^\\[Bazaar\\] Your price isn't competitive enough.*$");
     // [Bazaar] Claimed 160x Enchanted Coal worth 20,832.0 coins bought for 130.2 each!
     static final Pattern CLAIM_BUY = Pattern.compile(
             "^\\[Bazaar\\] Claimed ([\\d,]+)x (.+?) worth ([\\d,.]+) coins? bought for ([\\d,.]+) each!.*$");
@@ -133,6 +135,10 @@ public final class QuoteBook {
             Item it = get(m.group(2));
             if (it != null) { it.askUnits = 0; it.askSetAt = 0; it.askOrders = 0; }
             lastEvent = new Event(EventKind.CANCEL_SELL, m.group(2), num(m.group(1)), 0, 0, 0);
+            return null;
+        }
+        if (REJECTED.matcher(line).matches()) {
+            lastEvent = new Event(EventKind.REJECTED, null, 0, 0, 0, 0);
             return null;
         }
         if ((m = CANCELLED_BUY.matcher(line)).matches()) {

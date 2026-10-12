@@ -30,6 +30,12 @@ public final class QuickOrder {
 
     public void clear() { active = null; }
 
+    /** Same order, new price (e.g. after Hypixel rejects one), with a fresh timer. */
+    public void reprice(double price, long now) {
+        Active a = active;
+        if (a != null) active = new Active(a.itemName(), a.side(), price, a.amount(), now, a.mode());
+    }
+
     public Active current(long now) {
         Active a = active;
         if (a == null) return null;

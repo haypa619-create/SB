@@ -42,10 +42,25 @@ public final class MarketMaker {
                 Guard.Assessment.NONE);
     }
 
+    /** Largest skew by default, as % of the price. Hypixel and other mods reject big jumps over the best price. */
+    public static final double DEFAULT_MAX_SKEW_PCT = 2.0;
+
     /** Same, with the guard's view of the item (fair value, edge, and reasons to stay out). */
     public static Quote quote(BazaarData.Product p, long target, long inventory,
                               long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
                               double taxPct, double skewShare, Guard.Assessment g) {
+        return quote(p, target, inventory, liveAskUnits, liveAskPrice, liveBidUnits, liveBidPrice, taxPct, skewShare, g,
+                DEFAULT_MAX_SKEW_PCT);
+    }
+
+    /**
+     * @param maxSkewPct the skew never moves a quote more than this % past the best price. On wide
+     *                   items a quarter of the spread can be 15%+ over the best bid, which wastes edge
+     *                   and gets orders blocked.
+     */
+    public static Quote quote(BazaarData.Product p, long target, long inventory,
+                              long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
+                              double taxPct, double skewShare, Guard.Assessment g, double maxSkewPct) {
         if (g == null) g = Guard.Assessment.NONE;
         long position = inventory + liveAskUnits;
         State state = position < target * SHORT_BAND ? State.SHORT
@@ -58,8 +73,8 @@ public final class MarketMaker {
         double bidPrice = FlipMath.round1(topBid + FlipMath.TICK);
         double askPrice = FlipMath.round1(topAsk - FlipMath.TICK);
         double skew = (topBid > 0 && topAsk > 0) ? FlipMath.round1(Math.max(0, (topAsk - topBid) * skewShare)) : 0;
-        if (state == State.SHORT) bidPrice = FlipMath.round1(bidPrice + skew);
-        if (state == State.LONG) askPrice = FlipMath.round1(askPrice - skew);
+        if (state == State.SHORT) bidPrice = FlipMath.round1(bidPrice + Math.min(skew, FlipMath.round1(topBid * maxSkewPct / 100.0)));
+        if (state == State.LONG) askPrice = FlipMath.round1(askPrice - Math.min(skew, FlipMath.round1(topAsk * maxSkewPct / 100.0)));
         // never cross the book after skewing
         if (topAsk > 0 && bidPrice > topAsk - 2 * FlipMath.TICK) bidPrice = FlipMath.round1(topAsk - 2 * FlipMath.TICK);
         if (topBid > 0 && askPrice < topBid + 2 * FlipMath.TICK) askPrice = FlipMath.round1(topBid + 2 * FlipMath.TICK);

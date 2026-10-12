@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0
+- Tabbed desk: Quotes, Orders, Positions, Market, Journal, Alerts, Settings. Number keys 1-7 switch tabs; B reopens your last tab
+- Orders tab: every open order with on top / shared / outbid / pull status, age, and Re-price / Cancel / Pull buttons; Sync / claim highlights Manage Orders
+- Positions tab: holdings with cost, MTM, slots, and a List button for any item
+- Market tab: everything passing your filters ranked by profit per slot, with Exclude / Include
+- Alerts tab: log of the last 100 alerts
+- Journal: last 7 days shown day by day
+- Fix: SHORT skew is capped at 2% past the best price (it reached 16.9% on wide items, which other mods and Hypixel block). /bzh maxskew to change
+- Fix: when Hypixel says a price "isn't competitive enough", the mod refetches prices and fills a safe price into the next Custom Price sign
+- Fix: after cancelling to re-price, N puts the same item back up first
+
 ## 0.10.0
 - N and B now work on the board and inside Bazaar menus (key presses go to the open screen). The mod warns if another control shares the key
 - Manage Orders sync: opening /bz > Manage Orders reads your real orders, fills and claims, and the board matches them exactly

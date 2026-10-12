@@ -184,11 +184,13 @@ public final class BazaarHelper implements ClientModInitializer {
                 ping(false);
                 logAlert("Ask filled: " + FlipMath.fmt(ev.units()) + "x " + ev.item() + ". Claim the coins.", 0x55FFFF);
             }
+            case REJECTED -> onRejected();
             case CANCEL_BUY -> {
                 QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
                 if (a != null && a.mode() == QuickOrder.Mode.CANCEL && a.side() == QuickOrder.Side.BUY) {
                     DESK.clearBid(a.itemName());
                     QUICK.clear();
+                    rememberRequote(a.itemName(), QuickOrder.Side.BUY);
                     say(Component.literal("Bid on " + a.itemName() + " cancelled. Press N to do the next thing (re-bid if it's still worth it).")
                             .withStyle(ChatFormatting.GREEN));
                 }
@@ -197,12 +199,58 @@ public final class BazaarHelper implements ClientModInitializer {
                 QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
                 if (a != null && a.mode() == QuickOrder.Mode.CANCEL && a.side() == QuickOrder.Side.SELL) {
                     QUICK.clear();
+                    rememberRequote(a.itemName(), QuickOrder.Side.SELL);
                     say(Component.literal("Ask on " + ev.item() + " cancelled. Press N to list it again at the new price.")
                             .withStyle(ChatFormatting.GREEN));
                 }
             }
             default -> {}
         }
+    }
+
+    /** After a re-price cancel, N puts that same item back up first (for a few minutes). */
+    private static volatile String requoteId;
+    private static volatile QuickOrder.Side requoteSide;
+    private static volatile long requoteAt;
+    /** Whether the cancel in progress is a re-price (true) or a plain cancel / pull (false). */
+    private static volatile boolean cancelRequotes;
+
+    private static void rememberRequote(String itemName, QuickOrder.Side side) {
+        if (!cancelRequotes) return;
+        requoteId = DATA.idForName(itemName);
+        requoteSide = side;
+        requoteAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Hypixel refused the order price. Fetch fresh prices and retry at the plain best price + 0.1
+     * (no skew), so the next Custom Price sign gets a price Hypixel accepts.
+     */
+    private static void onRejected() {
+        QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+        if (a == null || a.mode() != QuickOrder.Mode.PLACE) return;
+        String id = DATA.idForName(a.itemName());
+        CompletableFuture.runAsync(() -> {
+            try { refreshPrices(); } catch (Exception ignored) {}
+            Minecraft.getInstance().execute(() -> {
+                BazaarData.Product p = DATA.get(id);
+                if (p == null) return;
+                boolean buy = a.side() == QuickOrder.Side.BUY;
+                double plain = buy ? FlipMath.round1(p.topBid() + FlipMath.TICK) : FlipMath.round1(p.topAsk() - FlipMath.TICK);
+                String msg = String.format(Locale.US, "Hypixel rejected %s %s at %s (best bid %s, best ask %s). ",
+                        buy ? "the bid on" : "the ask on", a.itemName(), FlipMath.fmt(a.price()),
+                        FlipMath.fmt(p.topBid()), FlipMath.fmt(p.topAsk()));
+                if (plain > 0 && Math.abs(plain - a.price()) >= FlipMath.TICK) {
+                    QUICK.reprice(plain, System.currentTimeMillis());
+                    say(Component.literal(msg + "Click Custom Price again: " + QuickOrder.formatPrice(plain) + " gets typed in.")
+                            .withStyle(ChatFormatting.YELLOW));
+                } else {
+                    QUICK.clear();
+                    say(Component.literal(msg + "Skipping it for now.").withStyle(ChatFormatting.YELLOW));
+                }
+                logAlert(msg, 0xFFFF55);
+            });
+        });
     }
 
     /** Keys already alerted, so each outbid or pull warning fires once until it clears. */
@@ -836,7 +884,7 @@ public final class BazaarHelper implements ClientModInitializer {
         return MarketMaker.quote(p, l.targetUnits(), inventory,
                 d == null ? 0 : (long) d.askUnits, d == null ? 0 : d.askPrice,
                 d == null ? 0 : (long) d.bidUnits, d == null ? 0 : d.bidPrice,
-                CONFIG.taxPercent, CONFIG.skewShare, assess(l.flip().id(), p, System.currentTimeMillis()));
+                CONFIG.taxPercent, CONFIG.skewShare, assess(l.flip().id(), p, System.currentTimeMillis()), CONFIG.maxSkewPct);
     }
 
     private static BoardScreen buildBoard(double total) {
@@ -877,7 +925,20 @@ public final class BazaarHelper implements ClientModInitializer {
             }
             Minecraft.getInstance().execute(() -> {
                 Planner.Book book = buildBook(boardTotal());
-                NextAction.Pick p = NextAction.pick(candidates(book, scanInventory()), canPlace());
+                List<NextAction.Candidate> cands = candidates(book, scanInventory());
+                NextAction.Pick p = NextAction.pick(cands, canPlace());
+                // Just cancelled to re-price: put that same item back up first.
+                if (requoteId != null && System.currentTimeMillis() - requoteAt < 3 * 60_000L && canPlace()) {
+                    for (NextAction.Candidate c : cands) {
+                        if (!c.id().equals(requoteId)) continue;
+                        boolean buy = requoteSide == QuickOrder.Side.BUY;
+                        MarketMaker.Action act = buy ? c.quote().bidAction() : c.quote().askAction();
+                        if (act == MarketMaker.Action.PLACE) {
+                            p = new NextAction.Pick(c.id(), c.name(), buy ? NextAction.Kind.PLACE_BID : NextAction.Kind.PLACE_ASK, 0);
+                        }
+                    }
+                    requoteId = null;
+                }
                 if (p == null) {
                     say(Component.literal(canPlace() ? "✔ Nothing to do. All quotes are live."
                             : "✔ Nothing to fix, and you're at your order cap (" + CONFIG.maxOrders + "). Wait for fills.")
@@ -946,6 +1007,7 @@ public final class BazaarHelper implements ClientModInitializer {
         ClientPacketListener conn = Minecraft.getInstance().getConnection();
         if (conn == null) return;
         String name = DATA.nameFor(id);
+        cancelRequotes = !pull;
         QUICK.start(new QuickOrder.Active(name, side, 0, 0, System.currentTimeMillis(), QuickOrder.Mode.CANCEL));
         conn.sendCommand("bz");
         String what = side == QuickOrder.Side.BUY ? "bid" : "ask";
@@ -1091,6 +1153,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 .then(setter("deviation", "percent", v -> CONFIG.guardDeviationPct = v, 1, 100, "Max % above average"))
                 .then(setter("fairhours", "hours", v -> CONFIG.fairHours = v, 1, 24, "Fair value hours"))
                 .then(setter("volk", "factor", v -> CONFIG.volK = v, 0, 5, "Edge per % swing"))
+                .then(setter("maxskew", "percent", v -> CONFIG.maxSkewPct = v, 0, 50, "Max skew past the best price (%)"))
                 .then(intSetter("maxorders", 1, 100, v -> CONFIG.maxOrders = v, "Max open orders"))
                 .then(literal("journal").executes(c -> { openJournal(); return 1; }))
                 .then(intSetter("slots", 1, MAIN_SLOTS, v -> CONFIG.slotBudget = v, "Slot budget"))

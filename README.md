@@ -34,6 +34,22 @@ No commands needed after that.
 
 Rebind keys in Options > Controls > Bazaar Helper.
 
+## Tabs
+
+Press **B** to open the desk (it reopens the tab you were last on). Number keys switch tabs:
+
+| Key | Tab | What's on it |
+|---|---|---|
+| 1 | **Quotes** | Your two-sided quotes for every item in the book (the board) |
+| 2 | **Orders** | Every open order: on top, shared, outbid or pull; how long it's been up; what's waiting to claim. Re-price / Cancel / Pull buttons, and **Sync / claim** to open Manage Orders |
+| 3 | **Positions** | Stock you hold: units, avg cost, mid, MTM, slots, and a **List** button (works for items no longer in the book too) |
+| 4 | **Market** | Every item that passes your filters, ranked by profit per slot, in your book or not. Exclude / Include from here |
+| 5 | **Journal** | P&L today / 7 days / all time, the last 7 days one by one, and per item stats |
+| 6 | **Alerts** | The last 100 outbid, undercut, pull, fill and rejection alerts |
+| 7 | **Settings** | Every setting |
+
+N works on every tab. Open tabs redraw with fresh prices every 20s (except Settings).
+
 ## The board
 
 **Header:** coins, slots used and free, realized P&L, mark-to-market, data age. Then **Next** with your to-do count, plus Settings / Close. Prices refresh on their own every 20s, so there's no Refresh button.

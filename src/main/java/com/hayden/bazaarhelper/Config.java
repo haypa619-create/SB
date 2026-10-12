@@ -28,6 +28,8 @@ public final class Config {
     public double stockHours = 6;
     /** Share of the spread to lean by when long or short. */
     public double skewShare = 0.25;
+    /** The skew never moves a quote more than this % past the best price. */
+    public double maxSkewPct = 2.0;
 
     /** "Lots of people in it": min coins traded per day on the thinner side. */
     public double minDailyCoinFlow = 25_000_000;
