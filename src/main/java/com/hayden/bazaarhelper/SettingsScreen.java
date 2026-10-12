@@ -15,22 +15,27 @@ import java.util.function.IntConsumer;
  * Each row: [ label ] [ - ] [ value ] [ + ]   (cycles have one button that steps through values)
  * Built only from vanilla Buttons.
  */
-public final class SettingsScreen extends Screen {
+public final class SettingsScreen extends DeskScreen {
     private static final int ROW_H = 22;
     private final boolean firstRun;
 
     public SettingsScreen(boolean firstRun) {
-        super(Component.literal(firstRun ? "Bazaar Helper Setup" : "Desk Settings"));
+        super(Tab.SETTINGS, Component.literal(firstRun ? "Bazaar Helper Setup" : "Desk Settings"));
         this.firstRun = firstRun;
     }
 
     @Override
-    protected void init() {
+    protected boolean showTabs() {
+        return !firstRun;
+    }
+
+    @Override
+    protected void initBody(int top) {
         Config c = BazaarHelper.CONFIG;
         int colW = Math.min(240, (this.width - 24) / 2);
         int left = (this.width - (2 * colW + 8)) / 2;
         int right = left + colW + 8;
-        int y0 = 8;
+        int y0 = top + 2;
 
         Button title = Button.builder(Component.literal(firstRun
                         ? "Welcome. Set up your desk, then hit Done (change any of this later with Settings on the board)."
@@ -229,8 +234,4 @@ public final class SettingsScreen extends Screen {
         return v == Math.rint(v) ? Long.toString((long) v) : String.format(Locale.US, "%s", v);
     }
 
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
 }

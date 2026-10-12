@@ -3,8 +3,6 @@ package com.hayden.bazaarhelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
@@ -23,7 +21,7 @@ import java.util.Locale;
  * Built only from vanilla Buttons so it survives Minecraft rendering changes.
  * PLACE and OUTBID sides are clickable; live and hold sides are not.
  */
-public final class BoardScreen extends Screen {
+public final class BoardScreen extends DeskScreen {
     public record Row(Planner.Line line, String name, long inventory, MarketMaker.Quote quote,
                       QuoteBook.Item desk, double mtm) {}
 
@@ -36,8 +34,6 @@ public final class BoardScreen extends Screen {
     private static final int SIDE_W = 116;
     private static final int X_W = 16;
 
-    /** True while a board is on screen, so the mod knows when to auto-refresh. */
-    private static volatile boolean open;
     /** Page survives refreshes. */
     private static int page = 0;
 
@@ -45,21 +41,16 @@ public final class BoardScreen extends Screen {
     private final List<Row> rows;
 
     public BoardScreen(Header header, List<Row> rows) {
-        super(Component.literal("Quote Board"));
+        super(Tab.QUOTES, Component.literal("Quote Board"));
         this.header = header;
         this.rows = rows;
     }
 
-    public static boolean isOpen() {
-        return open;
-    }
-
     @Override
-    protected void init() {
-        open = true;
-        int w = Math.min(540, this.width - 16);
-        int left = (this.width - w) / 2;
-        int y = 6;
+    protected void initBody(int top) {
+        int w = contentWidth();
+        int left = left();
+        int y = top;
         Planner.Book book = header.book();
 
         // ---- header line 1: the desk ----
@@ -115,7 +106,7 @@ public final class BoardScreen extends Screen {
 
         // ---- header line 2: controls ----
         int ctrlW = 64;
-        int nextW = w - 3 * (ctrlW + 4);
+        int nextW = w - (ctrlW + 4);
         NextAction.Pick next = header.next();
         if (next != null) {
             addRenderableWidget(Button.builder(Component.literal("▶ Next: " + next.describe())
@@ -134,14 +125,8 @@ public final class BoardScreen extends Screen {
             addRenderableWidget(done);
         }
         int cx = left + nextW + 4;
-        addRenderableWidget(Button.builder(Component.literal("Journal"), b -> BazaarHelper.show(new JournalScreen()))
-                .bounds(cx, y, ctrlW, 20)
-                .tooltip(Tooltip.create(Component.literal("P&L by day and by item, fill times. Saved as a spreadsheet file too.")))
-                .build());
-        addRenderableWidget(Button.builder(Component.literal("Settings"), b -> BazaarHelper.show(new SettingsScreen(false)))
-                .bounds(cx + ctrlW + 4, y, ctrlW, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
-                .bounds(cx + 2 * (ctrlW + 4), y, ctrlW, 20).build());
+                .bounds(cx, y, ctrlW, 20).build());
         y += 28;
 
         if (rows.isEmpty()) {
@@ -178,12 +163,6 @@ public final class BoardScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("▶"), b -> { page++; BazaarHelper.show(new BoardScreen(header, rows)); })
                     .bounds(left + 118, y, 20, 20).build()).active = page < pages - 1;
         }
-    }
-
-    @Override
-    public void removed() {
-        open = false;
-        super.removed();
     }
 
     // ---------- row widgets ----------
@@ -312,21 +291,9 @@ public final class BoardScreen extends Screen {
         return (s / 86400) + "d ago";
     }
 
-    /** B closes the board, N does the next thing (key presses go to the screen while it's open). */
-    @Override
-    public boolean keyPressed(KeyEvent e) {
-        if (PanelKey.isNext(e)) { this.onClose(); BazaarHelper.startNext(); return true; }
-        if (PanelKey.isBoard(e)) { this.onClose(); return true; }
-        return super.keyPressed(e);
-    }
-
     static String age(long time) {
         long s = Math.max(0, (System.currentTimeMillis() - time) / 1000);
         return s < 2 ? "live" : s + "s ago";
     }
 
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
 }

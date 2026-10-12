@@ -3,8 +3,6 @@ package com.hayden.bazaarhelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
@@ -16,38 +14,44 @@ import java.util.Locale;
  * profit per trip, average time to fill, units bought and sold. The same events are written to
  * config/bazaarhelper-journal.csv for a spreadsheet. Vanilla Buttons only.
  */
-public final class JournalScreen extends Screen {
-    private static final int ROW_H = 22;
+public final class JournalScreen extends DeskScreen {
     private static int page = 0;
 
     public JournalScreen() {
-        super(Component.literal("Journal"));
+        super(Tab.JOURNAL, Component.literal("Journal"));
     }
 
     @Override
-    protected void init() {
+    protected void initBody(int top) {
         QuoteBook d = BazaarHelper.DESK;
         long now = System.currentTimeMillis();
-        int w = Math.min(540, this.width - 16);
-        int left = (this.width - w) / 2;
-        int y = 6;
+        int w = contentWidth();
+        int left = left();
+        int y = top;
 
         MutableComponent head = Component.literal("Journal").withStyle(ChatFormatting.GOLD)
                 .append(part("   today ", d.realizedOn(QuoteBook.day(now))))
                 .append(part("   7 days ", d.realizedLastDays(7, now)))
                 .append(part("   all time ", d.realizedTotal));
-        inactive(head, left, y, w, "Realized P&L: spread captured on stock sold, after tax. Days are UTC.\n"
+        int fileW = 110;
+        inactive(head, left, y, w - fileW - 4, "Realized P&L: spread captured on stock sold, after tax. Days are UTC.\n"
                 + "Every fill, claim and cancel is also saved to config/" + Journal.FILE + " (opens in Excel / Sheets).");
+        button(Component.literal("Where's the file?"), left + w - fileW, y, fileW,
+                "Prints where the spreadsheet file is saved.", BazaarHelper::sayJournalPath);
         y += ROW_H;
 
-        int ctrlW = 64;
-        addRenderableWidget(Button.builder(Component.literal("◀ Board"), b -> BazaarHelper.openBoard())
-                .bounds(left, y, ctrlW + 16, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Where's the file?"), b -> BazaarHelper.sayJournalPath())
-                .bounds(left + ctrlW + 20, y, 110, 20)
-                .tooltip(Tooltip.create(Component.literal("Prints where the spreadsheet file is saved.")))
-                .build());
-        y += ROW_H + 6;
+        // last 7 days, one small box each
+        int dayW = (w - 6 * 2) / 7;
+        for (int i = 6; i >= 0; i--) {
+            long t = now - i * 86_400_000L;
+            String day = QuoteBook.day(t);
+            double r = d.realizedOn(day);
+            int x = left + (6 - i) * (dayW + 2);
+            inactive(Component.literal(day.substring(5) + " ").withStyle(ChatFormatting.GRAY)
+                            .append(Component.literal(BoardScreen.signed(r)).withStyle(r > 0 ? ChatFormatting.GREEN : r < 0 ? ChatFormatting.RED : ChatFormatting.DARK_GRAY)),
+                    x, y, dayW, day + " (UTC)\nRealized " + BoardScreen.signed(r) + "\nTraded " + FlipMath.fmt(d.volumeOn(day)));
+        }
+        y += ROW_H + 4;
 
         List<Journal.ItemStats> stats = Journal.stats(d);
         if (stats.isEmpty()) {
@@ -73,13 +77,7 @@ public final class JournalScreen extends Screen {
                     st.name(), FlipMath.fmt(st.bought()), FlipMath.fmt(st.sold()), minutes(st.avgFillMinutes())));
             y += ROW_H;
         }
-        if (pages > 1) {
-            y += 4;
-            addRenderableWidget(Button.builder(Component.literal("◀"), b -> { page--; BazaarHelper.show(new JournalScreen()); })
-                    .bounds(left, y, 20, 20).build()).active = page > 0;
-            addRenderableWidget(Button.builder(Component.literal("▶"), b -> { page++; BazaarHelper.show(new JournalScreen()); })
-                    .bounds(left + 24, y, 20, 20).build()).active = page < pages - 1;
-        }
+        pager(y + 4, page, pages, p -> { page = p; BazaarHelper.show(new JournalScreen()); });
     }
 
     private void inactive(Component label, int x, int y, int w, String tip) {
@@ -98,14 +96,4 @@ public final class JournalScreen extends Screen {
         return String.format(Locale.US, "%.1fh", m / 60);
     }
 
-    @Override
-    public boolean keyPressed(KeyEvent e) {
-        if (PanelKey.isBoard(e)) { BazaarHelper.openBoard(); return true; }
-        return super.keyPressed(e);
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
 }

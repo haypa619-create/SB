@@ -12,8 +12,8 @@ public final class QuickOrder {
     public enum Side { BUY, SELL }
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
-    /** PLACE: a new order. CANCEL: take down a live order (to re-price or pull it). */
-    public enum Mode { PLACE, CANCEL }
+    /** PLACE: a new order. CANCEL: take down a live order (to re-price or pull it). ORDERS: just open Manage Orders. */
+    public enum Mode { PLACE, CANCEL, ORDERS }
 
     public record Active(String itemName, Side side, double price, long amount, long createdAt, Mode mode) {
         public Active(String itemName, Side side, double price, long amount, long createdAt) {
@@ -93,6 +93,9 @@ public final class QuickOrder {
         String t = BazaarData.stripFormatting(title == null ? "" : title).toLowerCase(Locale.US);
         boolean buy = a.side() == Side.BUY;
 
+        if (a.mode() == Mode.ORDERS) {
+            return OrderSync.isOrdersTitle(title) ? -1 : find(names, "manage orders", false);
+        }
         if (a.mode() == Mode.CANCEL) {
             // Bazaar main page > Manage Orders > your order > Cancel Order
             int c = find(names, "cancel order", false);

@@ -110,7 +110,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 pendingScreen = null;
                 setScreen(s);
             }
-            if (PanelKey.pressed()) openBoard();
+            if (PanelKey.pressed()) openTab(DeskScreen.lastTab());
             if (PanelKey.nextPressed()) startNext();
             if (++tickCount % 20 == 0) readPurse(client);
             if (!keysChecked && client.player != null && tickCount % 100 == 0) { keysChecked = true; warnKeyConflicts(); }
@@ -169,6 +169,7 @@ public final class BazaarHelper implements ClientModInitializer {
         switch (ev.kind()) {
             case FILLED_BUY -> {
                 ping(false);
+                logAlert("Bid filled: " + FlipMath.fmt(ev.units()) + "x " + ev.item() + ". Claim it, then list it.", 0x55FF55);
                 String id = DATA.idForName(ev.item());
                 int stack = id == null ? 64 : DATA.stackSize(id);
                 int need = (int) Math.ceil(ev.units() / Math.max(1, stack));
@@ -179,7 +180,10 @@ public final class BazaarHelper implements ClientModInitializer {
                             ev.item(), need, need == 1 ? "" : "s", free)).withStyle(ChatFormatting.RED));
                 }
             }
-            case FILLED_SELL -> ping(false);
+            case FILLED_SELL -> {
+                ping(false);
+                logAlert("Ask filled: " + FlipMath.fmt(ev.units()) + "x " + ev.item() + ". Claim the coins.", 0x55FFFF);
+            }
             case CANCEL_BUY -> {
                 QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
                 if (a != null && a.mode() == QuickOrder.Mode.CANCEL && a.side() == QuickOrder.Side.BUY) {
@@ -239,7 +243,31 @@ public final class BazaarHelper implements ClientModInitializer {
         if (alerted.add(key)) {
             say(msg);
             ping(true);
+            logAlert(msg.getString(), msg.getStyle().getColor() == null ? 0xFFAA00 : msg.getStyle().getColor().getValue());
         }
+    }
+
+    // ---------- alert log (Alerts tab) ----------
+
+    public record AlertEntry(long time, String text, int color) {}
+
+    private static final java.util.Deque<AlertEntry> ALERT_LOG = new java.util.ArrayDeque<>();
+    private static int unreadAlerts = 0;
+
+    static synchronized void logAlert(String text, int color) {
+        ALERT_LOG.addFirst(new AlertEntry(System.currentTimeMillis(), text, color));
+        while (ALERT_LOG.size() > 100) ALERT_LOG.removeLast();
+        unreadAlerts++;
+    }
+
+    public static synchronized List<AlertEntry> alertLog() {
+        unreadAlerts = 0;
+        return new ArrayList<>(ALERT_LOG);
+    }
+
+    public static synchronized void clearAlerts() {
+        ALERT_LOG.clear();
+        unreadAlerts = 0;
     }
 
     private static void warnKeyConflicts() {
@@ -281,11 +309,177 @@ public final class BazaarHelper implements ClientModInitializer {
             boolean first = lastSig[0] == null;
             lastSig[0] = sig;
             String summary = DESK.syncFrom(orders, System.currentTimeMillis());
+            QuickOrder.Active qa = QUICK.current(System.currentTimeMillis());
+            if (qa != null && qa.mode() == QuickOrder.Mode.ORDERS) QUICK.clear();
             Config.saveBook(configDir, DESK);
             if (first && CONFIG.chatNotes) say(Component.literal(summary).withStyle(ChatFormatting.GRAY));
             if (CONFIG.debug) say(Component.literal("Orders menu: " + names.size() + " items, " + orders.size() + " orders")
                     .withStyle(ChatFormatting.DARK_GRAY));
         });
+    }
+
+    // ---------- tabs ----------
+
+    /** Opens a desk tab (B reopens the last one). */
+    public static void openTab(DeskScreen.Tab t) {
+        if (!CONFIG.setupDone) { show(new SettingsScreen(true)); return; }
+        switch (t) {
+            case QUOTES -> openBoard();
+            case ORDERS -> show(new OrdersScreen());
+            case POSITIONS -> show(new PositionsScreen());
+            case MARKET -> show(new MarketScreen());
+            case JOURNAL -> show(new JournalScreen());
+            case ALERTS -> show(new AlertsScreen());
+            case SETTINGS -> show(new SettingsScreen(false));
+        }
+        if (DATA.products().isEmpty() && t != DeskScreen.Tab.QUOTES) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    refreshPrices();
+                    Minecraft.getInstance().execute(BazaarHelper::redrawOpenTab);
+                } catch (Exception e) {
+                    LOG.warn("Price load failed: {}", e.toString());
+                }
+            });
+        }
+    }
+
+    /** After a price refresh, redraw whichever tab is open (not Settings, so clicks there aren't lost). */
+    private static void redrawOpenTab() {
+        DeskScreen.Tab t = DeskScreen.openTab();
+        if (t == null || t == DeskScreen.Tab.SETTINGS) return;
+        if (t == DeskScreen.Tab.QUOTES) show(buildBoard(boardTotal()));
+        else openTab(t);
+    }
+
+    /** Small count on a tab button ("" for none). */
+    public static String tabBadge(DeskScreen.Tab t) {
+        return switch (t) {
+            case ORDERS -> {
+                int n = DESK.liveOrders();
+                int c = DESK.toClaim == null ? 0 : DESK.toClaim.size();
+                yield n == 0 && c == 0 ? "" : c > 0 ? n + "+" + c : Integer.toString(n);
+            }
+            case ALERTS -> unreadAlerts > 0 ? "(" + unreadAlerts + ")" : "";
+            default -> "";
+        };
+    }
+
+    /** One open order side for the Orders tab. */
+    public record OrderRow(String id, String name, QuickOrder.Side side, long units, int orders, double price,
+                           double top, String status, ChatFormatting color, boolean pull, long setAt) {}
+
+    public static List<OrderRow> orderRows() {
+        List<OrderRow> out = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, QuoteBook.Item> e : DESK.items.entrySet()) {
+            QuoteBook.Item it = e.getValue();
+            String id = DATA.idForName(e.getKey());
+            BazaarData.Product p = DATA.get(id);
+            String name = id != null ? DATA.nameFor(id) : Journal.title(e.getKey());
+            if (it.bidUnits > 0) {
+                double top = p == null ? 0 : p.topBid();
+                boolean pull = p != null && assess(id, p, now).pullBid();
+                String st; ChatFormatting c;
+                if (p == null) { st = "no price data"; c = ChatFormatting.GRAY; }
+                else if (pull) { st = "PULL: falling"; c = ChatFormatting.RED; }
+                else if (it.bidPrice + MarketMaker.TOLERANCE < top) { st = "outbid by " + FlipMath.fmt(top - it.bidPrice); c = ChatFormatting.GOLD; }
+                else if (p.bidCrowd() > 1 && Math.abs(it.bidPrice - top) <= MarketMaker.TOLERANCE) { st = "on top (shared)"; c = ChatFormatting.GREEN; }
+                else { st = "on top"; c = ChatFormatting.GREEN; }
+                out.add(new OrderRow(id, name, QuickOrder.Side.BUY, (long) it.bidUnits, Math.max(1, it.bidOrders),
+                        it.bidPrice, top, st, c, pull, it.bidSetAt));
+            }
+            if (it.askUnits > 0) {
+                double top = p == null ? 0 : p.topAsk();
+                String st; ChatFormatting c;
+                if (p == null) { st = "no price data"; c = ChatFormatting.GRAY; }
+                else if (top > 0 && it.askPrice - MarketMaker.TOLERANCE > top) { st = "undercut by " + FlipMath.fmt(it.askPrice - top); c = ChatFormatting.GOLD; }
+                else if (p.askCrowd() > 1 && Math.abs(it.askPrice - top) <= MarketMaker.TOLERANCE) { st = "on top (shared)"; c = ChatFormatting.AQUA; }
+                else { st = "on top"; c = ChatFormatting.AQUA; }
+                out.add(new OrderRow(id, name, QuickOrder.Side.SELL, (long) it.askUnits, Math.max(1, it.askOrders),
+                        it.askPrice, top, st, c, false, it.askSetAt));
+            }
+        }
+        // problems first, then biggest
+        out.sort((a, b) -> {
+            int pa = a.color() == ChatFormatting.RED ? 0 : a.color() == ChatFormatting.GOLD ? 1 : 2;
+            int pb = b.color() == ChatFormatting.RED ? 0 : b.color() == ChatFormatting.GOLD ? 1 : 2;
+            if (pa != pb) return Integer.compare(pa, pb);
+            return Double.compare(b.units() * b.price(), a.units() * a.price());
+        });
+        return out;
+    }
+
+    /** One held item for the Positions tab. */
+    public record PositionRow(String id, String name, long held, long inAsk, double avgCost, double costUnits,
+                              double mid, double mtm, int slots, long target, boolean inBook, MarketMaker.State state) {}
+
+    public static List<PositionRow> positionRows() {
+        InventoryScan inv = scanInventory();
+        Set<String> ids = new java.util.LinkedHashSet<>(inv.counts().keySet());
+        for (Map.Entry<String, QuoteBook.Item> e : DESK.items.entrySet()) {
+            if (e.getValue().costUnits > 0 || e.getValue().askUnits > 0) {
+                String id = DATA.idForName(e.getKey());
+                if (id != null) ids.add(id);
+            }
+        }
+        Planner.Book book = lastBook;
+        List<PositionRow> out = new ArrayList<>();
+        for (String id : ids) {
+            String name = DATA.nameFor(id);
+            QuoteBook.Item d = DESK.get(name);
+            BazaarData.Product p = DATA.get(id);
+            long held = inv.counts().getOrDefault(id, 0L);
+            long inAsk = d == null ? 0 : (long) d.askUnits;
+            double mid = p == null || p.topBid() <= 0 || p.topAsk() <= 0 ? 0 : (p.topBid() + p.topAsk()) / 2;
+            Planner.Line line = book == null ? null : book.find(id);
+            long target = line == null ? 0 : line.targetUnits();
+            long pos = held + inAsk;
+            MarketMaker.State st = target <= 0 ? MarketMaker.State.LONG
+                    : pos < target * MarketMaker.SHORT_BAND ? MarketMaker.State.SHORT
+                    : pos > target * MarketMaker.LONG_BAND ? MarketMaker.State.LONG : MarketMaker.State.BALANCED;
+            out.add(new PositionRow(id, name, held, inAsk, d == null ? 0 : d.avgCost, d == null ? 0 : d.costUnits,
+                    mid, QuoteBook.markToMarket(d, p), (int) Math.ceil(held / (double) Math.max(1, DATA.stackSize(id))),
+                    target, line != null, st));
+        }
+        out.sort((a, b) -> Double.compare(b.held() * b.mid(), a.held() * a.mid()));
+        return out;
+    }
+
+    public static int freeSlots() {
+        return scanInventory().freeSlots();
+    }
+
+    /** One item for the Market tab: everything that passes your filters, ranked by profit per slot. */
+    public record MarketRow(Planner.Line line, String name, boolean inBook, boolean excluded, String guard) {}
+
+    public static List<MarketRow> marketRows() {
+        Planner.Settings b = CONFIG.plannerSettings(boardTotal());
+        // Unlimited coins and slots, so every item that passes the filters gets ranked on its own merits.
+        Planner.Settings wide = new Planner.Settings(b.taxPct(), 1e15, 0, b.maxItemPct(), 60, 100_000, b.stockHours(),
+                b.minDailyCoinFlow(), b.minDailyUnits(), b.minMarginPct(), b.maxCrowd(), b.crowdWeight());
+        Planner.Book all = Planner.build(DATA.products().values(), DATA::stackSize, wide);
+        Planner.Book mine = lastBook;
+        long now = System.currentTimeMillis();
+        List<MarketRow> out = new ArrayList<>();
+        for (Planner.Line l : all.lines()) {
+            String id = l.flip().id();
+            Guard.Assessment g = assess(id, DATA.get(id), now);
+            out.add(new MarketRow(l, DATA.nameFor(id), mine != null && mine.find(id) != null,
+                    CONFIG.excluded.contains(id), g.reason()));
+        }
+        out.sort((x, y) -> Double.compare(y.line().profitPerSlot(), x.line().profitPerSlot()));
+        return out;
+    }
+
+    public static void includeItem(String id) {
+        CONFIG.excluded.remove(id);
+        CONFIG.save();
+    }
+
+    public static void toggleExcluded(String id) {
+        if (CONFIG.excluded.contains(id)) CONFIG.excluded.remove(id); else CONFIG.excluded.add(id);
+        CONFIG.save();
     }
 
     // ---------- screens ----------
@@ -527,7 +721,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 refreshPrices();
                 Minecraft.getInstance().execute(() -> {
                     checkAlerts();
-                    if (BoardScreen.isOpen()) show(buildBoard(boardTotal()));
+                    redrawOpenTab();
                 });
             } catch (Exception e) {
                 LOG.warn("Auto-refresh failed: {}", e.toString());
@@ -701,6 +895,39 @@ public final class BazaarHelper implements ClientModInitializer {
     }
 
     // ---------- orders ----------
+
+    /** Opens /bz and highlights Manage Orders, to sync your orders and claim fills. */
+    public static void startSync() {
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (conn == null) return;
+        QUICK.start(new QuickOrder.Active("", QuickOrder.Side.BUY, 0, 0, System.currentTimeMillis(), QuickOrder.Mode.ORDERS));
+        conn.sendCommand("bz");
+        say(Component.literal("Click the green Manage Orders slot. Your orders sync as it opens; click filled ones to claim.")
+                .withStyle(ChatFormatting.GRAY));
+    }
+
+    /** List any item you hold (in the book or not) at the top ask - 0.1, guarded by fair value. */
+    public static void startListAny(String id) {
+        BazaarData.Product p = DATA.get(id);
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (p == null || conn == null) return;
+        Planner.Book book = lastBook;
+        if (book != null && book.find(id) != null) { startQuote(id, QuickOrder.Side.SELL); return; }
+        String name = DATA.nameFor(id);
+        long have = scanInventory().counts().getOrDefault(id, 0L);
+        if (have <= 0) { say(Component.literal("No " + name + " in your inventory.").withStyle(ChatFormatting.YELLOW)); return; }
+        if (!canPlace()) {
+            say(Component.literal("You're at your order cap (" + CONFIG.maxOrders + "). Cancel one first.").withStyle(ChatFormatting.YELLOW));
+            return;
+        }
+        double price = p.topAsk() > 0 ? FlipMath.round1(p.topAsk() - FlipMath.TICK) : FlipMath.round1(p.topBid() * 1.03);
+        if (p.topBid() > 0) price = Math.max(price, FlipMath.round1(p.topBid() + 2 * FlipMath.TICK));
+        QUICK.start(new QuickOrder.Active(name, QuickOrder.Side.SELL, price, 0, System.currentTimeMillis()));
+        conn.sendCommand("bz " + name);
+        say(Component.literal("List " + name + ": ").withStyle(ChatFormatting.AQUA)
+                .append(Component.literal(String.format(Locale.US, "click the green slots. Price %s gets typed in. Lists your %,d.",
+                        QuickOrder.formatPrice(price), have)).withStyle(ChatFormatting.GRAY)));
+    }
 
     public static void openJournal() {
         show(new JournalScreen());
