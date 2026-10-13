@@ -19,12 +19,23 @@ Relisting is done with **Bazaar Utils** and price tooltips come from **Skyblocke
 
 No commands needed after that.
 
+## Fast path: N then Enter, Enter, Enter
+
+Press **N** (works in the world, on any tab, or inside a Bazaar menu). Then press **Enter** at each step: Enter clicks the green slot once, and on a sign the mod filled in, Enter presses Done. No aiming, no mouse. One key press is still exactly one click.
+
+The chain is also shorter when it can be:
+- **Price:** when your price is exactly the best + 0.1, the green slot is Hypixel's "Top Order +0.1" button (one click) instead of Custom Price + a sign.
+- **Amount:** when a Hypixel preset ("Buy a stack!" etc.) is within 25% of the planned size, the green slot is that preset (one click) instead of Custom Amount + a sign. Settings > Preset amounts (0 = always exact).
+
+A bid is usually: N, then Enter about 5 times (item, Create Buy Order, amount, price, Confirm). Turn it off in Settings > Enter clicks, or rebind it in Controls > Bazaar Helper > Click the Green Slot.
+
 ## Controls
 
 | Key or button | What it does |
 |---|---|
 | **B** | Open the quote board (also works inside Bazaar menus; on the board it closes it) |
 | **N** | Do the next most urgent thing (works in the world, on the board, and inside Bazaar menus) |
+| **Enter** | In a Bazaar menu: click the green slot once. On a sign the mod filled in: Done |
 | **← Board** / **Next ▶** | Top-left of every Bazaar menu: back to the board, or straight to the next thing |
 | **Bid / Ask @ price** | Place that quote: runs `/bz <item>`, outlines each slot to click in green, fills in the signs |
 | **⚠ outbid / ⚠ Pull bid** | Green slots lead you through Manage Orders > your order > Cancel. Then N re-places it at the new price |

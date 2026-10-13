@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+- Enter clicks the green slot (one click per press, no aiming) and presses Done on signs the mod filled in. Rebindable; toggle in Settings
+- Price step uses Hypixel's "Top Order +0.1" button when your price matches it exactly (skips the sign)
+- Amount step uses a preset amount button when one is within 25% of the plan (skips the sign). Settings > Preset amounts, /bzh presets
+
 ## 0.13.0
 - Home tab (key 1): account value in big numbers, today's change, 24h account-value chart, cash / in orders / stock / trades cards, one Next button, and a "Needs you" list where each line fixes the problem in one click
 - Item page: click any item name (Quotes, Orders, Positions, Market) or /bzh item <name>. 24h bid/ask chart with your quotes, cost, fair value, target and stop; 1h/6h/24h change; flow, depth, crowding, margin, est/day, fair value, edge, guard; your position and history; Bid / Ask / Trade / Exclude
