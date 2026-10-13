@@ -36,18 +36,21 @@ Rebind keys in Options > Controls > Bazaar Helper.
 
 ## Tabs
 
-Press **B** to open the desk (it reopens the tab you were last on). Number keys 1-8 switch tabs:
+Press **B** to open the desk (it reopens the tab you were last on). Number keys 1-9 switch tabs:
 
 | Key | Tab | What's on it |
 |---|---|---|
-| 1 | **Quotes** | Your two-sided quotes for every item in the book (the board) |
-| 2 | **Orders** | Every open order: on top, shared, outbid or pull; how long it's been up; what's waiting to claim. Re-price / Cancel / Pull buttons, and **Sync / claim** to open Manage Orders |
-| 3 | **Positions** | Stock you hold: units, avg cost, mid, MTM, slots, and a **List** button (works for items no longer in the book too) |
-| 4 | **Trading** | Directional trades with a target and a stop, kept apart from market making (see below) |
-| 5 | **Market** | Every item that passes your filters, ranked by profit per slot, in your book or not. Exclude / Include from here |
-| 6 | **Journal** | P&L today / 7 days / all time, the last 7 days one by one, and per item stats |
-| 7 | **Alerts** | The last 100 outbid, undercut, pull, fill and rejection alerts |
-| 8 | **Settings** | Every setting |
+| 1 | **Home** | Account value (big), today's change, a 24h account-value chart, cash / in orders / stock / trades, one **Next** button, and a "Needs you" list where every line is one click to fix |
+| 2 | **Quotes** | Your two-sided quotes for every item in the book (the board) |
+| 3 | **Orders** | Every open order: on top, shared, outbid or pull; how long it's been up; what's waiting to claim. Re-price / Cancel / Pull buttons, and **Sync / claim** to open Manage Orders |
+| 4 | **Positions** | Stock you hold: units, avg cost, mid, MTM, slots, and a **List** button (works for items no longer in the book too) |
+| 5 | **Trading** | Directional trades with a target and a stop, kept apart from market making (see below) |
+| 6 | **Market** | Every item that passes your filters with margin, est/day, per slot, 24h change and crowd. Sort button. Trade / Exclude from here |
+| 7 | **Journal** | P&L today / 7 days / all time, the last 7 days one by one, and per item stats |
+| 8 | **Alerts** | The last 100 outbid, undercut, pull, fill and rejection alerts |
+| 9 | **Settings** | Every setting |
+
+**Click any item name** (on Quotes, Orders, Positions or Market, or `/bzh item <name>`) for its **item page**: a 24h chart of best bid and ask with your quotes, cost, fair value and trade target / stop drawn on it; 1h / 6h / 24h change; margin, weekly flow, coin flow, depth at the top, crowding, est/day, per slot, target stock; fair value, edge and the guard's view; your holding, live quotes, cost, MTM, realized and fill times; and Bid / Ask / Trade / Exclude buttons.
 
 N works on every tab. Open tabs redraw with fresh prices every 20s (except Settings).
 

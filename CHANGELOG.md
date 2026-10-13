@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0
+- Home tab (key 1): account value in big numbers, today's change, 24h account-value chart, cash / in orders / stock / trades cards, one Next button, and a "Needs you" list where each line fixes the problem in one click
+- Item page: click any item name (Quotes, Orders, Positions, Market) or /bzh item <name>. 24h bid/ask chart with your quotes, cost, fair value, target and stop; 1h/6h/24h change; flow, depth, crowding, margin, est/day, fair value, edge, guard; your position and history; Bid / Ask / Trade / Exclude
+- Market tab: 24h change column and a Sort button (per slot, margin, est/day, 24h change, crowd)
+- Tabs are 1-9 now; B opens Home the first time
+
 ## 0.12.0
 - Trading tab: directional trades with size, entry (buy order or insta-buy), target and stop; reward:risk after tax before you commit
 - Trades are kept apart from market making: one owner per item, traded items leave the book, their fills and P&L never touch market-making numbers, and you can't trade an item you're market making
