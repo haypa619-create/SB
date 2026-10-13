@@ -36,19 +36,33 @@ Rebind keys in Options > Controls > Bazaar Helper.
 
 ## Tabs
 
-Press **B** to open the desk (it reopens the tab you were last on). Number keys switch tabs:
+Press **B** to open the desk (it reopens the tab you were last on). Number keys 1-8 switch tabs:
 
 | Key | Tab | What's on it |
 |---|---|---|
 | 1 | **Quotes** | Your two-sided quotes for every item in the book (the board) |
 | 2 | **Orders** | Every open order: on top, shared, outbid or pull; how long it's been up; what's waiting to claim. Re-price / Cancel / Pull buttons, and **Sync / claim** to open Manage Orders |
 | 3 | **Positions** | Stock you hold: units, avg cost, mid, MTM, slots, and a **List** button (works for items no longer in the book too) |
-| 4 | **Market** | Every item that passes your filters, ranked by profit per slot, in your book or not. Exclude / Include from here |
-| 5 | **Journal** | P&L today / 7 days / all time, the last 7 days one by one, and per item stats |
-| 6 | **Alerts** | The last 100 outbid, undercut, pull, fill and rejection alerts |
-| 7 | **Settings** | Every setting |
+| 4 | **Trading** | Directional trades with a target and a stop, kept apart from market making (see below) |
+| 5 | **Market** | Every item that passes your filters, ranked by profit per slot, in your book or not. Exclude / Include from here |
+| 6 | **Journal** | P&L today / 7 days / all time, the last 7 days one by one, and per item stats |
+| 7 | **Alerts** | The last 100 outbid, undercut, pull, fill and rejection alerts |
+| 8 | **Settings** | Every setting |
 
 N works on every tab. Open tabs redraw with fresh prices every 20s (except Settings).
+
+## Trading (kept apart from market making)
+
+For directional bets: buy, hold, sell at a target or bail at a stop.
+
+- **Start one:** Market tab > **Trade** on any item, or `/bzh trade <item>`. Pick the size, entry (buy order at best bid + 0.1, or insta-buy at the best ask), target % and stop %. It shows cost, reward, risk and reward:risk after tax.
+- **Enter / exit:** green slots with the numbers typed in. **List** puts a sell offer at the target, **Sell** insta-sells now, **Close** stops tracking.
+- **Stop hit:** alert + low note, and N goes straight to Sell Instantly. **Target reached:** alert.
+
+How they stay apart:
+- **One owner per item.** An item with an open trade leaves the market-making book until the trade closes. You can't open a trade on an item that has market-making orders or stock (a Bazaar sell offer lists every unit you carry, so they'd mix).
+- The trade's fills, cost and P&L are tracked only on the Trading tab. Market-making quotes, cost basis, realized P&L and capital never include them.
+- Both share Hypixel's open-order cap and daily limit. The journal file tags each row `mm` or `trade`.
 
 ## The board
 

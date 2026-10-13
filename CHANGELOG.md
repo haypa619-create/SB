@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0
+- Trading tab: directional trades with size, entry (buy order or insta-buy), target and stop; reward:risk after tax before you commit
+- Trades are kept apart from market making: one owner per item, traded items leave the book, their fills and P&L never touch market-making numbers, and you can't trade an item you're market making
+- Stop-hit and target alerts; N sells a stopped-out trade first (green Sell Instantly slot)
+- Insta-buy and insta-sell detection; green-slot guides for both
+- Market tab: Trade button. Orders tab shows trade orders. Journal shows trading P&L separately; the journal file tags rows mm / trade
+- /bzh trade [item]
+
 ## 0.11.1
 - Fix: the green-slot guide ends when you close the Bazaar (it kept pointing at Manage Orders)
 - Fix: a cancel finishes when the order is gone from Manage Orders, or on any "order cancelled" chat line, including SkyHanni's rewritten one

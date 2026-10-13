@@ -1106,6 +1106,17 @@ public final class BazaarHelper implements ClientModInitializer {
             show(new TradesScreen());
             return;
         }
+        // One owner per item: Hypixel lists ALL of an item you carry in a sell offer, so market-making
+        // stock or orders on the same item would mix into the trade.
+        String name = DATA.nameFor(id);
+        QuoteBook.Item d = DESK.get(name);
+        long held = scanInventory().counts().getOrDefault(id, 0L);
+        if (d != null && (d.bidUnits > 0 || d.askUnits > 0) || held > 0) {
+            say(Component.literal("To trade " + name + ", first take down its market-making orders and sell the "
+                    + (held > 0 ? held + " you hold" : "stock") + " (Orders / Positions tabs). Keeps the two books from mixing.")
+                    .withStyle(ChatFormatting.YELLOW));
+            return;
+        }
         show(new TradeSetupScreen(id));
     }
 
