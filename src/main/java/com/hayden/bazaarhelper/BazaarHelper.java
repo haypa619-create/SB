@@ -418,6 +418,7 @@ public final class BazaarHelper implements ClientModInitializer {
     public static void openTab(DeskScreen.Tab t) {
         if (!CONFIG.setupDone) { show(new SettingsScreen(true)); return; }
         switch (t) {
+            case HOME -> show(new HomeScreen());
             case QUOTES -> openBoard();
             case ORDERS -> show(new OrdersScreen());
             case POSITIONS -> show(new PositionsScreen());
@@ -441,10 +442,132 @@ public final class BazaarHelper implements ClientModInitializer {
 
     /** After a price refresh, redraw whichever tab is open (not Settings, so clicks there aren't lost). */
     private static void redrawOpenTab() {
-        DeskScreen.Tab t = DeskScreen.openTab();
-        if (t == null || t == DeskScreen.Tab.SETTINGS) return;
-        if (t == DeskScreen.Tab.QUOTES) show(buildBoard(boardTotal()));
-        else openTab(t);
+        DeskScreen cur = DeskScreen.current();
+        if (cur == null) return;
+        if (cur instanceof BoardScreen) { show(buildBoard(boardTotal())); return; }
+        DeskScreen next = cur.refreshed();
+        if (next != null) show(next);
+    }
+
+    /** One thing that needs you, for the Home tab. Click runs `action`. */
+    public record Attention(String text, ChatFormatting color, String tip, Runnable action) {}
+
+    public static List<Attention> attention() {
+        List<Attention> out = new ArrayList<>();
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product p = DATA.get(t.itemId);
+            if (p == null) continue;
+            if (t.stopHit(p.topBid())) out.add(new Attention("Stop hit on your " + t.name + " trade: sell now", ChatFormatting.RED,
+                    "Best bid " + FlipMath.fmt(p.topBid()) + " is at or below your stop " + FlipMath.fmt(t.stop), () -> startInstaSell(t)));
+            else if (t.targetHit(p.topBid()) && t.status != TradeBook.Status.EXITING) out.add(new Attention(
+                    "Target reached on your " + t.name + " trade", ChatFormatting.GREEN, "Sell now or list at the target",
+                    () -> openTab(DeskScreen.Tab.TRADING)));
+        }
+        for (OrderRow r : orderRows()) {
+            if (r.id() == null) continue;
+            if (r.pull()) out.add(new Attention("Pull your bid on " + r.name() + " (falling fast)", ChatFormatting.RED,
+                    "The guard says get out before it fills into a loss", () -> startCancel(r.id(), r.side(), true)));
+            else if (r.color() == ChatFormatting.GOLD) out.add(new Attention(
+                    (r.side() == QuickOrder.Side.BUY ? "Outbid on " : "Undercut on ") + r.name() + ": re-price",
+                    ChatFormatting.GOLD, r.status(), () -> startCancel(r.id(), r.side(), false)));
+        }
+        int claims = DESK.toClaim == null ? 0 : DESK.toClaim.size();
+        if (claims > 0) out.add(new Attention(claims + " filled order" + (claims == 1 ? "" : "s") + " to claim", ChatFormatting.YELLOW,
+                "Opens Manage Orders (green slot)", BazaarHelper::startSync));
+        int free = scanInventory().freeSlots();
+        if (free < 3) out.add(new Attention("Inventory almost full (" + free + " free)", ChatFormatting.RED,
+                "Fills you claim need room. List some stock.", () -> openTab(DeskScreen.Tab.POSITIONS)));
+        if (!canPlace()) out.add(new Attention("At your order cap (" + CONFIG.maxOrders + ")", ChatFormatting.YELLOW,
+                "No room for new orders until something fills or you cancel", () -> openTab(DeskScreen.Tab.ORDERS)));
+        if (DESK.syncedAt == 0 || System.currentTimeMillis() - DESK.syncedAt > 6 * 3_600_000L) out.add(new Attention(
+                "Sync your orders (not synced in a while)", ChatFormatting.GRAY, "Opens Manage Orders so the desk is exact", BazaarHelper::startSync));
+        return out;
+    }
+
+    /** What N would do right now, in words, or null. */
+    public static String nextDescribe() {
+        if (DATA.products().isEmpty()) return null;
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product tp = DATA.get(t.itemId);
+            if (tp != null && t.stopHit(tp.topBid())) return "Sell " + t.name + " (stop hit)";
+        }
+        NextAction.Pick p = NextAction.pick(candidates(buildBook(boardTotal()), scanInventory()), canPlace());
+        return p == null ? null : p.describe();
+    }
+
+    /** The planner's view of one item even if it isn't in your book (for the item page). */
+    public static Planner.Line lineFor(String id) {
+        Planner.Book mine = lastBook;
+        Planner.Line l = mine == null ? null : mine.find(id);
+        if (l != null) return l;
+        BazaarData.Product p = DATA.get(id);
+        if (p == null) return null;
+        Planner.Settings b = CONFIG.plannerSettings(boardTotal());
+        Planner.Settings one = new Planner.Settings(b.taxPct(), 1e15, 0, b.maxItemPct(), 1, 100_000, b.stockHours(),
+                0, 0, -100, 1_000_000, b.crowdWeight());
+        Planner.Book bk = Planner.build(List.of(p), DATA::stackSize, one);
+        return bk.lines().isEmpty() ? null : bk.lines().get(0);
+    }
+
+    public static boolean inBook(String id) {
+        Planner.Book mine = lastBook;
+        return mine != null && mine.find(id) != null;
+    }
+
+    public static long held(String id) {
+        return scanInventory().counts().getOrDefault(id, 0L);
+    }
+
+    /** Opens the item page (Bloomberg-style detail). `from` is the tab highlighted and returned to. */
+    public static void openItem(String id, DeskScreen.Tab from) {
+        if (id == null || DATA.get(id) == null) return;
+        show(new ItemScreen(id, from));
+    }
+
+    /**
+     * Everything you own, in coins: purse + coins locked in buy orders (market making and trades)
+     * + market-making stock at the best bid + trade holdings at the best bid.
+     */
+    public static double accountValue() {
+        if (purse < 0) return -1;
+        double v = purse + lockedInBids() + stockValue();
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product p = DATA.get(t.itemId);
+            v += t.pendingBuy * t.entryPrice + (p == null ? t.units * t.avgCost : t.units * p.topBid());
+        }
+        return v;
+    }
+
+    public static double lockedInBidsPublic() {
+        return lockedInBids();
+    }
+
+    public static double stockValuePublic() {
+        return stockValue();
+    }
+
+    public static double tradesValue() {
+        double v = 0;
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product p = DATA.get(t.itemId);
+            v += t.pendingBuy * t.entryPrice + (p == null ? t.units * t.avgCost : t.units * p.topBid());
+        }
+        return v;
+    }
+
+    /** Realized today, market making + trading. */
+    public static double todayRealized() {
+        String d = QuoteBook.day(System.currentTimeMillis());
+        return DESK.realizedOn(d) + TRADES.realizedOn(d);
+    }
+
+    private static void recordEquity() {
+        double v = accountValue();
+        if (v > 0) synchronized (HISTORY) { HISTORY.recordValue(PriceHistory.EQUITY, v, System.currentTimeMillis()); }
+    }
+
+    public static List<PriceHistory.Sample> history(String key) {
+        synchronized (HISTORY) { return HISTORY.samples(key); }
     }
 
     /** Small count on a tab button ("" for none). */
@@ -873,6 +996,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 refreshPrices();
                 Minecraft.getInstance().execute(() -> {
                     checkAlerts();
+                    recordEquity();
                     redrawOpenTab();
                 });
             } catch (Exception e) {
@@ -1314,7 +1438,12 @@ public final class BazaarHelper implements ClientModInitializer {
                 .then(literal("book").executes(c -> withData(c, () -> printBook(c, boardTotal()))))
                 .then(literal("item")
                         .then(argument("name", StringArgumentType.greedyString())
-                                .executes(c -> withData(c, () -> item(c, StringArgumentType.getString(c, "name"))))))
+                                .executes(c -> withData(c, () -> {
+                                    String n = StringArgumentType.getString(c, "name");
+                                    String iid = DATA.idForName(n);
+                                    if (iid != null && DATA.get(iid) != null) openItem(iid, DeskScreen.lastTab());
+                                    else item(c, n);
+                                }))))
                 .then(literal("pnl")
                         .executes(BazaarHelper::pnl)
                         .then(literal("reset").executes(c -> {

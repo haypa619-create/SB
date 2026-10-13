@@ -17,6 +17,11 @@ import java.util.Locale;
 public final class JournalScreen extends DeskScreen {
     private static int page = 0;
 
+    @Override
+    public DeskScreen refreshed() {
+        return new JournalScreen();
+    }
+
     public JournalScreen() {
         super(Tab.JOURNAL, Component.literal("Journal"));
     }

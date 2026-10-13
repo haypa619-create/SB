@@ -15,6 +15,11 @@ import java.util.Map;
 public final class OrdersScreen extends DeskScreen {
     private static int page = 0;
 
+    @Override
+    public DeskScreen refreshed() {
+        return new OrdersScreen();
+    }
+
     public OrdersScreen() {
         super(Tab.ORDERS, Component.literal("Open Orders"));
     }
@@ -74,9 +79,10 @@ public final class OrdersScreen extends DeskScreen {
                     .append(Component.literal(r.name()).withStyle(ChatFormatting.WHITE))
                     .append(Component.literal("  " + BoardScreen.shortUnits(r.units()) + (r.orders() > 1 ? " (" + r.orders() + " orders)" : ""))
                             .withStyle(ChatFormatting.GRAY));
-            label(info, x, y, infoW, String.format(Locale.US, "%s %s\n%,d units at %s = %s\nUp for %s",
+            String rid = r.id();
+            button(info, x, y, infoW, String.format(Locale.US, "%s %s\n%,d units at %s = %s\nUp for %s\nClick for the item page",
                     buy ? "Buy order" : "Sell offer", r.name(), r.units(), FlipMath.fmt(r.price()),
-                    FlipMath.fmt(r.units() * r.price()), ago(r.setAt())));
+                    FlipMath.fmt(r.units() * r.price()), ago(r.setAt())), () -> BazaarHelper.openItem(rid, Tab.ORDERS));
             x += infoW + 4;
             label(Component.literal(FlipMath.fmt(r.price())).withStyle(ChatFormatting.WHITE)
                             .append(Component.literal(" top " + (r.top() > 0 ? FlipMath.fmt(r.top()) : "-")).withStyle(ChatFormatting.DARK_GRAY)),

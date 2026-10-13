@@ -14,6 +14,20 @@ import java.util.Locale;
 public final class MarketScreen extends DeskScreen {
     private static int page = 0;
 
+    /** Column to sort by (the Sort button cycles). */
+    enum Sort {
+        PER_SLOT("profit per slot"), MARGIN("margin"), EST_DAY("est. per day"), CHANGE_24H("24h change"), CROWD("least crowded");
+        final String label;
+        Sort(String label) { this.label = label; }
+    }
+
+    private static Sort sort = Sort.PER_SLOT;
+
+    @Override
+    public DeskScreen refreshed() {
+        return new MarketScreen();
+    }
+
     public MarketScreen() {
         super(Tab.MARKET, Component.literal("Market"));
     }
@@ -21,12 +35,34 @@ public final class MarketScreen extends DeskScreen {
     @Override
     protected void initBody(int top) {
         int w = contentWidth(), left = left(), y = top;
-        List<BazaarHelper.MarketRow> rows = BazaarHelper.marketRows();
+        List<BazaarHelper.MarketRow> rows = new java.util.ArrayList<>(BazaarHelper.marketRows());
+        long now = System.currentTimeMillis();
+        java.util.Map<String, Double> chg = new java.util.HashMap<>();
+        for (BazaarHelper.MarketRow r : rows) {
+            BazaarData.Product p = BazaarHelper.DATA.get(r.line().flip().id());
+            double mid = p == null ? 0 : (p.topBid() + p.topAsk()) / 2;
+            chg.put(r.line().flip().id(), Stats.changePct(BazaarHelper.history(r.line().flip().id()), mid, now, 24 * 3_600_000L));
+        }
+        java.util.Comparator<BazaarHelper.MarketRow> cmp = switch (sort) {
+            case PER_SLOT -> java.util.Comparator.comparingDouble(r -> -r.line().profitPerSlot());
+            case MARGIN -> java.util.Comparator.comparingDouble(r -> -r.line().flip().marginPct());
+            case EST_DAY -> java.util.Comparator.comparingDouble(r -> -r.line().estDailyProfit());
+            case CHANGE_24H -> java.util.Comparator.comparingDouble(r -> {
+                double c = chg.get(r.line().flip().id());
+                return Double.isFinite(c) ? -c : Double.MAX_VALUE;
+            });
+            case CROWD -> java.util.Comparator.comparingInt(r -> r.line().crowd());
+        };
+        rows.sort(cmp);
         long inBook = rows.stream().filter(BazaarHelper.MarketRow::inBook).count();
+        int sortW = 150;
         label(Component.literal(rows.size() + " items pass your filters").withStyle(ChatFormatting.GOLD)
-                        .append(Component.literal("   " + inBook + " in your book   ranked by profit per slot").withStyle(ChatFormatting.GRAY)),
-                left, y, w, "Filters: min weekly units, min daily coin flow, max crowd, min margin (Settings).\n"
-                        + "Est/day assumes you capture your share of the flow at the current spread.");
+                        .append(Component.literal("   " + inBook + " in your book").withStyle(ChatFormatting.GRAY)),
+                left, y, w - sortW - 4, "Filters: min weekly units, min daily coin flow, max crowd, min margin (Settings).\n"
+                        + "Est/day assumes you capture your share of the flow at the current spread.\nClick a name for the item page.");
+        button(Component.literal("Sort: " + sort.label).withStyle(ChatFormatting.YELLOW), left + w - sortW, y, sortW,
+                "Click to change the sort", () -> { sort = Sort.values()[(sort.ordinal() + 1) % Sort.values().length]; page = 0;
+                    BazaarHelper.show(new MarketScreen()); });
         y += ROW_H;
         if (rows.isEmpty()) {
             label(Component.literal("Nothing passes. Lower Min weekly units or Max crowd in Settings.").withStyle(ChatFormatting.GRAY),
@@ -34,8 +70,8 @@ public final class MarketScreen extends DeskScreen {
             return;
         }
 
-        int nameW = (int) (w * 0.32), marginW = (int) (w * 0.16), estW = (int) (w * 0.22), flowW = (int) (w * 0.14);
-        int btnW = w - nameW - marginW - estW - flowW - 16;
+        int nameW = (int) (w * 0.29), marginW = (int) (w * 0.11), estW = (int) (w * 0.22), chgW = (int) (w * 0.10), flowW = (int) (w * 0.10);
+        int btnW = w - nameW - marginW - estW - chgW - flowW - 20;
         int perPage = rowsThatFit(y);
         int pages = (rows.size() + perPage - 1) / perPage;
         page = Math.max(0, Math.min(page, pages - 1));
@@ -49,8 +85,9 @@ public final class MarketScreen extends DeskScreen {
                     .append(Component.literal(r.name()).withStyle(r.excluded() ? ChatFormatting.DARK_GRAY
                             : r.inBook() ? ChatFormatting.GREEN : ChatFormatting.WHITE))
                     .append(Component.literal(warn ? " ⚠" : "").withStyle(ChatFormatting.RED));
-            label(name, x, y, nameW, r.name() + (r.inBook() ? "  (in your book)" : "") + (r.excluded() ? "  (excluded)" : "")
-                    + (warn ? "\nGuard: " + r.guard() : ""));
+            String rid = f.id();
+            button(name, x, y, nameW, r.name() + (r.inBook() ? "  (in your book)" : "") + (r.excluded() ? "  (excluded)" : "")
+                    + (warn ? "\nGuard: " + r.guard() : "") + "\nClick for the item page", () -> BazaarHelper.openItem(rid, Tab.MARKET));
             x += nameW + 4;
             label(Component.literal(String.format(Locale.US, "%.2f%%", f.marginPct())).withStyle(ChatFormatting.YELLOW), x, y, marginW,
                     String.format(Locale.US, "Bid %s / ask %s\n+%s per unit after tax", FlipMath.fmt(f.buyAt()), FlipMath.fmt(f.sellAt()),
@@ -61,6 +98,11 @@ public final class MarketScreen extends DeskScreen {
                     x, y, estW, String.format(Locale.US, "Est. %s per day, %s per inventory slot\nTarget stock %,d (%d slots)",
                             FlipMath.fmt(l.estDailyProfit()), FlipMath.fmt(l.profitPerSlot()), l.targetUnits(), l.slots()));
             x += estW + 4;
+            double c24 = chg.get(f.id());
+            label(Component.literal(Stats.pct(c24)).withStyle(!Double.isFinite(c24) ? ChatFormatting.DARK_GRAY
+                            : c24 >= 0 ? ChatFormatting.GREEN : ChatFormatting.RED), x, y, chgW,
+                    "Mid price change over 24h, from the mod's own history (n/a until it has a day)");
+            x += chgW + 4;
             label(Component.literal("crowd " + l.crowd()).withStyle(l.crowd() <= 3 ? ChatFormatting.GREEN
                             : l.crowd() <= 8 ? ChatFormatting.YELLOW : ChatFormatting.RED), x, y, flowW,
                     String.format(Locale.US, "%d orders near the top price (0.1 wars)\n%s units a day flow through both sides",

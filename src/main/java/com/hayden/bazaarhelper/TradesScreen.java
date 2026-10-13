@@ -14,6 +14,11 @@ import java.util.Locale;
 public final class TradesScreen extends DeskScreen {
     private static int page = 0;
 
+    @Override
+    public DeskScreen refreshed() {
+        return new TradesScreen();
+    }
+
     public TradesScreen() {
         super(Tab.TRADING, Component.literal("Trading"));
     }

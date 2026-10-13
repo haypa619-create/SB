@@ -14,6 +14,11 @@ import java.util.Locale;
 public final class PositionsScreen extends DeskScreen {
     private static int page = 0;
 
+    @Override
+    public DeskScreen refreshed() {
+        return new PositionsScreen();
+    }
+
     public PositionsScreen() {
         super(Tab.POSITIONS, Component.literal("Positions"));
     }
@@ -66,10 +71,11 @@ public final class PositionsScreen extends DeskScreen {
                     .append(Component.literal("  " + BoardScreen.shortUnits(r.held())
                             + (r.inAsk() > 0 ? " +" + BoardScreen.shortUnits(r.inAsk()) + " listed" : "")
                             + (r.target() > 0 ? " / " + BoardScreen.shortUnits(r.target()) : "")).withStyle(ChatFormatting.GRAY));
-            label(info, x, y, infoW, String.format(Locale.US, "%s\nIn inventory %,d, listed %,d\n%s",
+            String rid = r.id();
+            button(info, x, y, infoW, String.format(Locale.US, "%s  (click for the item page)\nIn inventory %,d, listed %,d\n%s",
                     r.name(), r.held(), r.inAsk(),
                     r.inBook() ? "Target stock " + r.target() + " (" + r.state().name() + ")"
-                            : "Not in your book any more: sell it down."));
+                            : "Not in your book any more: sell it down."), () -> BazaarHelper.openItem(rid, Tab.POSITIONS));
             x += infoW + 4;
             label(Component.literal(r.costUnits() > 0 ? "cost " + FlipMath.fmt(r.avgCost()) : "cost ?").withStyle(ChatFormatting.GRAY)
                             .append(Component.literal("  mid " + (r.mid() > 0 ? FlipMath.fmt(r.mid()) : "-")).withStyle(ChatFormatting.WHITE)),

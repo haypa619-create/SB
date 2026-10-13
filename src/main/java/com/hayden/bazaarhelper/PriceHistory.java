@@ -41,6 +41,15 @@ public final class PriceHistory {
         }
     }
 
+    /** Key for your account value over time (Home chart). Keys starting with "_" survive retain(). */
+    public static final String EQUITY = "_EQUITY";
+
+    /** Records a single value series (e.g. account value), one sample per SAMPLE_MS. */
+    public void recordValue(String key, double value, long now) {
+        if (value <= 0) return;
+        record(java.util.List.of(new BazaarData.Product(key, value, value, 0, 0)), now);
+    }
+
     public List<Sample> samples(String id) {
         double[] arr = series.get(id);
         List<Sample> out = new ArrayList<>();
@@ -51,7 +60,7 @@ public final class PriceHistory {
 
     /** Keeps only the given items (e.g. ones liquid enough to ever make the book), to bound memory. */
     public void retain(java.util.Set<String> ids) {
-        series.keySet().retainAll(ids);
+        series.keySet().removeIf(k -> !k.startsWith("_") && !ids.contains(k));
     }
 
     public static PriceHistory empty() {

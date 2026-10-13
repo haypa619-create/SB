@@ -9,6 +9,11 @@ import java.util.List;
 public final class AlertsScreen extends DeskScreen {
     private static int page = 0;
 
+    @Override
+    public DeskScreen refreshed() {
+        return new AlertsScreen();
+    }
+
     public AlertsScreen() {
         super(Tab.ALERTS, Component.literal("Alerts"));
     }

@@ -197,9 +197,10 @@ public final class BoardScreen extends DeskScreen {
         String deskLine = d == null || d.costUnits <= 0 ? "No cost basis yet (your claims set it)"
                 : String.format(Locale.US, "Avg cost %s on %,d units, MTM %s",
                 FlipMath.fmt(d.avgCost), (long) d.costUnits, signed(r.mtm()));
-        Button b = Button.builder(label, x2 -> {}).bounds(x, y, width, 20)
+        String itemId = l.flip().id();
+        Button b = Button.builder(label, x2 -> BazaarHelper.openItem(itemId, Tab.QUOTES)).bounds(x, y, width, 20)
                 .tooltip(Tooltip.create(Component.literal(String.format(Locale.US,
-                        "%s  (%s)\nTarget stock %,d: %d slot%s, stacks of %d\nIn inventory %,d, in live ask %,d\n"
+                        "%s  (%s)  click for the item page\nTarget stock %,d: %d slot%s, stacks of %d\nIn inventory %,d, in live ask %,d\n"
                                 + "Spread %s / %s, +%s/unit after tax (%.2f%%)\n"
                                 + "Est. %s/day, %s per slot\nRealized %s over %d round trips\n%s%s",
                         r.name(), q.state().name(), l.targetUnits(), l.slots(), l.slots() == 1 ? "" : "s", l.stackSize(),
@@ -211,7 +212,6 @@ public final class BoardScreen extends DeskScreen {
                         deskLine, q.note().isEmpty() ? "" : "\n\n" + q.note())
                         + BazaarHelper.guardInfo(l.flip().id()))))
                 .build();
-        b.active = false;
         return b;
     }
 
