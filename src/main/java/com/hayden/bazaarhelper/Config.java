@@ -58,6 +58,11 @@ public final class Config {
     /** Extra edge per % of price swing. 0 = quote the plain top of book. */
     public double volK = 0.25;
 
+    /** Enter (rebindable) clicks the green slot once, and presses Done on a sign the mod filled in. */
+    public boolean enterClicks = true;
+    /** Use Hypixel's preset amount buttons when one is within this % of the planned size (0 = never). */
+    public double presetTolerancePct = 25;
+
     /** Sound on outbid, fills and pull warnings. */
     public boolean sounds = true;
 

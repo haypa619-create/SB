@@ -17,6 +17,7 @@ import net.minecraft.resources.Identifier;
 public final class PanelKey {
     private static KeyMapping board;
     private static KeyMapping next;
+    private static KeyMapping click;
 
     private PanelKey() {}
 
@@ -27,6 +28,8 @@ public final class PanelKey {
                 "key.bazaarhelper.panel", InputConstants.Type.KEYSYM, InputConstants.KEY_B, category));
         next = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.bazaarhelper.next", InputConstants.Type.KEYSYM, InputConstants.KEY_N, category));
+        click = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.bazaarhelper.click", InputConstants.Type.KEYSYM, InputConstants.KEY_RETURN, category));
     }
 
     /** True once per press of the board key. Call every client tick. */
@@ -45,6 +48,17 @@ public final class PanelKey {
      */
     public static boolean isNext(KeyEvent e) {
         return next != null && next.matches(e);
+    }
+
+    /** The "click the green slot" key (Enter by default; numpad Enter too). */
+    public static boolean isClick(KeyEvent e) {
+        if (click == null) return false;
+        if (click.matches(e)) return true;
+        return click.getTranslatedKeyMessage().getString().equalsIgnoreCase("Enter") && e.key() == InputConstants.KEY_NUMPADENTER;
+    }
+
+    public static String clickKeyName() {
+        return click == null ? "Enter" : click.getTranslatedKeyMessage().getString();
     }
 
     public static boolean isBoard(KeyEvent e) {

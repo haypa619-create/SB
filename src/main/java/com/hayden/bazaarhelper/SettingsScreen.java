@@ -103,6 +103,14 @@ public final class SettingsScreen extends DeskScreen {
         stepper(right, gy, colW, "Pull on drop", "Pull bids when the price falls this much in 30 minutes.",
                 () -> c.guardDropPct, d -> c.guardDropPct = clamp(c.guardDropPct + d * 0.5, 0.5, 50), v -> trim(v) + "%");
 
+        gy += ROW_H;
+        toggle(left, gy, colW, "Enter clicks", "Enter clicks the green slot once and presses Done on a sign the mod filled in.\n"
+                        + "One key press = one click, no aiming. Rebind in Controls (Click the Green Slot).",
+                () -> c.enterClicks, on -> c.enterClicks = on);
+        stepper(right, gy, colW, "Preset amounts", "Use Hypixel's preset amount buttons (one click, no sign) when one is\n"
+                        + "within this % of the planned size. 0 = always type the exact amount.",
+                () -> c.presetTolerancePct, d -> c.presetTolerancePct = clamp(c.presetTolerancePct + d * 5, 0, 100), v -> trim(v) + "%");
+
         int by = gy + ROW_H + 8;
 
         // ---- footer ----

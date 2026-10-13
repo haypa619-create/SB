@@ -114,6 +114,64 @@ public final class QuickOrder {
      * Sell: search results > item page (Create Sell Offer) > price screen (Custom Price) > Confirm.
      */
     public static int pickSlot(String title, java.util.List<String> names, Active a) {
+        return pickSlot(title, names, null, a, 0);
+    }
+
+    private static final java.util.regex.Pattern LORE_PRICE =
+            java.util.regex.Pattern.compile("(?i)price per unit:\\s*([\\d,]+(?:\\.\\d+)?)");
+    private static final java.util.regex.Pattern LORE_AMOUNT =
+            java.util.regex.Pattern.compile("(?i)amount:\\s*([\\d,]+)\\s*x");
+
+    /**
+     * Same, but reads each slot's tooltip to skip signs when a ready-made button does the job:
+     *   price: Hypixel's "Top Order +0.1" / "Best Offer -0.1" button, when its price per unit is
+     *          exactly your price (one click instead of Custom Price + Done)
+     *   amount: a preset ("Buy a stack!", ...) within presetTolerancePct of your size
+     *          (0 = always use Custom Amount)
+     */
+    public static int pickSlot(String title, java.util.List<String> names, java.util.List<java.util.List<String>> lores,
+                               Active a, double presetTolerancePct) {
+        int i = pickSlotBase(title, names, a);
+        if (i < 0 || lores == null || a == null || a.mode() != Mode.PLACE) return i;
+        String picked = clean(names.get(i));
+        if (picked.contains("custom price") && a.price() > 0) {
+            for (int k = 0; k < names.size(); k++) {
+                if (k == i || names.get(k) == null || clean(names.get(k)).contains("custom")) continue;
+                double v = loreNumber(lores, k, LORE_PRICE);
+                if (v > 0 && Math.abs(v - a.price()) <= 0.05) return k;
+            }
+        }
+        if (picked.contains("custom amount") && a.side() == Side.BUY && a.amount() > 0 && presetTolerancePct > 0) {
+            int best = -1;
+            double bestGap = Double.MAX_VALUE;
+            for (int k = 0; k < names.size(); k++) {
+                if (k == i || names.get(k) == null || clean(names.get(k)).contains("custom")) continue;
+                double v = loreNumber(lores, k, LORE_AMOUNT);
+                if (v <= 0) continue;
+                double gap = Math.abs(v - a.amount()) / a.amount() * 100;
+                if (gap <= presetTolerancePct && gap < bestGap) { best = k; bestGap = gap; }
+            }
+            if (best >= 0) return best;
+        }
+        return i;
+    }
+
+    private static double loreNumber(java.util.List<java.util.List<String>> lores, int k, java.util.regex.Pattern p) {
+        if (k >= lores.size() || lores.get(k) == null) return -1;
+        for (String line : lores.get(k)) {
+            java.util.regex.Matcher m = p.matcher(BazaarData.stripFormatting(line));
+            if (m.find()) {
+                try { return Double.parseDouble(m.group(1).replace(",", "")); } catch (NumberFormatException e) { return -1; }
+            }
+        }
+        return -1;
+    }
+
+    private static String clean(String n) {
+        return n == null ? "" : BazaarData.stripFormatting(n).toLowerCase(Locale.US);
+    }
+
+    private static int pickSlotBase(String title, java.util.List<String> names, Active a) {
         if (a == null || names == null) return -1;
         String t = BazaarData.stripFormatting(title == null ? "" : title).toLowerCase(Locale.US);
         boolean buy = a.side() == Side.BUY;

@@ -33,6 +33,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
@@ -129,6 +130,16 @@ public final class BazaarHelper implements ClientModInitializer {
             }
             onScreenOpened(screen);
             addBazaarMenuButtons(screen);
+            if (screen instanceof AbstractSignEditScreen) {
+                // Enter on a sign the mod filled in = Done (vanilla Enter just moves to the next line)
+                ScreenKeyboardEvents.allowKeyPress(screen).register((s, e) -> {
+                    if (!CONFIG.enterClicks || !PanelKey.isClick(e) || QUICK.current(System.currentTimeMillis()) == null) return true;
+                    String[] lines = ((SignEditAccessor) s).bazaarhelper$getMessages();
+                    if (lines.length == 0 || BazaarData.stripFormatting(lines[0]).isBlank() || !debounce()) return true;
+                    s.onClose(); // sends the sign, same as clicking Done
+                    return false;
+                });
+            }
             if (screen instanceof AbstractContainerScreen<?> cs && QuickOrder.isBazaarTitle(screen.getTitle().getString())) {
                 ScreenEvents.afterExtract(screen).register((s, g, mx, my, delta) -> highlightNextSlot(cs, g));
                 // B and N work inside Bazaar menus too (key presses go to the menu, not the key mapping)
@@ -136,6 +147,7 @@ public final class BazaarHelper implements ClientModInitializer {
                     if (s.getFocused() instanceof EditBox) return; // typing in a search box
                     if (PanelKey.isNext(e)) { closeMenu(); startNext(); }
                     else if (PanelKey.isBoard(e)) { closeMenu(); openBoard(); }
+                    else if (CONFIG.enterClicks && PanelKey.isClick(e)) clickGreenSlot(cs);
                 });
                 if (OrderSync.isOrdersTitle(screen.getTitle().getString())) watchOrdersMenu(cs);
             }
@@ -773,26 +785,59 @@ public final class BazaarHelper implements ClientModInitializer {
      * (the item, then Create Buy Order / Create Sell Offer, Custom Amount, Custom Price,
      * confirm). Drawing only: you still do every click.
      */
-    private static void highlightNextSlot(AbstractContainerScreen<?> screen, GuiGraphicsExtractor g) {
+    /** The menu slot to click next for the order in progress (null = none). Reads names and tooltips. */
+    private static Slot greenSlot(AbstractContainerScreen<?> screen) {
         QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
-        if (a == null) return;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-
+        if (a == null || mc.player == null) return null;
         List<Slot> slots = new ArrayList<>();
         List<String> names = new ArrayList<>();
+        List<List<String>> lores = new ArrayList<>();
         for (Slot slot : screen.getMenu().slots) {
             if (slot.container == mc.player.getInventory()) continue; // menu slots only
             slots.add(slot);
             ItemStack st = slot.getItem();
             names.add(st.isEmpty() ? null : st.getHoverName().getString());
+            List<String> lore = new ArrayList<>();
+            ItemLore il = st.isEmpty() ? null : st.get(DataComponents.LORE);
+            if (il != null) for (Component c : il.lines()) lore.add(c.getString());
+            lores.add(lore);
         }
-        int i = QuickOrder.pickSlot(screen.getTitle().getString(), names, a);
-        if (i < 0) return;
+        int i = QuickOrder.pickSlot(screen.getTitle().getString(), names, lores, a, CONFIG.presetTolerancePct);
+        return i < 0 ? null : slots.get(i);
+    }
+
+    private static long lastEnterClick = 0;
+
+    /** Ignores key repeat, so holding Enter can't click twice. */
+    private static boolean debounce() {
+        long now = System.currentTimeMillis();
+        if (now - lastEnterClick < 250) return false;
+        lastEnterClick = now;
+        return true;
+    }
+
+    /**
+     * Enter in a Bazaar menu: one key press clicks the green slot once (the same single click you'd
+     * make with the mouse, without aiming). Never more than one click per press.
+     */
+    private static void clickGreenSlot(AbstractContainerScreen<?> screen) {
+        Minecraft mc = Minecraft.getInstance();
+        Slot target = greenSlot(screen);
+        if (target == null || mc.gameMode == null || mc.player == null || !debounce()) return;
+        mc.gameMode.handleContainerInput(screen.getMenu().containerId, target.index, 0, ContainerInput.PICKUP, mc.player);
+    }
+
+    private static void highlightNextSlot(AbstractContainerScreen<?> screen, GuiGraphicsExtractor g) {
+        QuickOrder.Active a = QUICK.current(System.currentTimeMillis());
+        if (a == null) return;
+        Minecraft mc = Minecraft.getInstance();
+        Slot target = greenSlot(screen);
+        if (target == null) return;
 
         ContainerScreenAccessor acc = (ContainerScreenAccessor) screen;
-        int x = acc.bazaarhelper$getLeftPos() + slots.get(i).x;
-        int y = acc.bazaarhelper$getTopPos() + slots.get(i).y;
+        int x = acc.bazaarhelper$getLeftPos() + target.x;
+        int y = acc.bazaarhelper$getTopPos() + target.y;
         // Pulse between bright and soft green so it catches the eye.
         double t = (System.currentTimeMillis() % 1000) / 1000.0;
         int alpha = 0x60 + (int) (0x50 * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI)));
@@ -800,7 +845,8 @@ public final class BazaarHelper implements ClientModInitializer {
         g.outline(x - 2, y - 2, 20, 20, 0xFF55FF55);
         g.outline(x - 1, y - 1, 18, 18, 0xFF55FF55);
 
-        String hint = (a.side() == QuickOrder.Side.BUY ? "Bid " : "Ask ") + a.itemName() + ": click the green slot";
+        String hint = (a.side() == QuickOrder.Side.BUY ? "Bid " : "Ask ") + a.itemName() + ": click the green slot"
+                + (CONFIG.enterClicks ? " (or press " + PanelKey.clickKeyName() + ")" : "");
         g.centeredText(mc.font, Component.literal(hint).withStyle(ChatFormatting.GREEN),
                 screen.width / 2, 8, 0xFFFFFFFF);
     }
@@ -1477,6 +1523,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 .then(setter("deviation", "percent", v -> CONFIG.guardDeviationPct = v, 1, 100, "Max % above average"))
                 .then(setter("fairhours", "hours", v -> CONFIG.fairHours = v, 1, 24, "Fair value hours"))
                 .then(setter("volk", "factor", v -> CONFIG.volK = v, 0, 5, "Edge per % swing"))
+                .then(setter("presets", "percent", v -> CONFIG.presetTolerancePct = v, 0, 100, "Use a preset amount within (%)"))
                 .then(setter("maxskew", "percent", v -> CONFIG.maxSkewPct = v, 0, 50, "Max skew past the best price (%)"))
                 .then(intSetter("maxorders", 1, 100, v -> CONFIG.maxOrders = v, "Max open orders"))
                 .then(literal("journal").executes(c -> { openJournal(); return 1; }))
