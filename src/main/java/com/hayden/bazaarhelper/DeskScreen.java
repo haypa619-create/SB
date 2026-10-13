@@ -10,9 +10,9 @@ import net.minecraft.network.chat.Component;
 /**
  * Base for every desk tab: draws the tab bar, handles keys, and has small widget helpers.
  *
- *   [ 1 Quotes ][ 2 Orders ][ 3 Positions ][ 4 Market ][ 5 Journal ][ 6 Alerts ][ 7 Settings ]
+ *   [ 1 Quotes ][ 2 Orders ][ 3 Positions ][ 4 Trading ][ 5 Market ][ 6 Journal ][ 7 Alerts ][ 8 Settings ]
  *
- * Keys on any tab: 1-7 switch tabs, N does the next thing, B closes.
+ * Keys on any tab: 1-8 switch tabs, N does the next thing, B closes.
  * Built only from vanilla Buttons so it survives Minecraft rendering changes.
  */
 public abstract class DeskScreen extends Screen {
@@ -20,6 +20,7 @@ public abstract class DeskScreen extends Screen {
         QUOTES("Quotes", "Your two-sided quotes for every item in the book"),
         ORDERS("Orders", "Every open order: on top or outbid, filled, waiting to claim"),
         POSITIONS("Positions", "Stock you hold: cost, mark-to-market, slots"),
+        TRADING("Trading", "Directional trades with target and stop, kept apart from market making"),
         MARKET("Market", "Best items on the Bazaar right now, in your book or not"),
         JOURNAL("Journal", "P&L by day and by item, fill times"),
         ALERTS("Alerts", "Outbid, undercut, pull and fill alerts"),
@@ -147,7 +148,7 @@ public abstract class DeskScreen extends Screen {
     public boolean keyPressed(KeyEvent e) {
         if (showTabs()) {
             int k = e.key();
-            if (k >= 49 && k <= 48 + Tab.values().length) { // number keys 1-7
+            if (k >= 49 && k <= 48 + Tab.values().length) { // number keys 1-8
                 BazaarHelper.openTab(Tab.values()[k - 49]);
                 return true;
             }

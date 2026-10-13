@@ -67,8 +67,12 @@ public final class MarketScreen extends DeskScreen {
                             l.crowd(), FlipMath.fmt(f.dailyUnits())));
             x += flowW + 4;
             String id = f.id();
-            button(Component.literal(r.excluded() ? "Include" : "Exclude").withStyle(r.excluded() ? ChatFormatting.GREEN : ChatFormatting.GRAY),
-                    x, y, btnW, r.excluded() ? "Let the book use this item again" : "Keep this item out of your book",
+            int half = (btnW - 4) / 2;
+            button(Component.literal("Trade").withStyle(ChatFormatting.LIGHT_PURPLE), x, y, half,
+                    "Set up a directional trade (target and stop).\nThe item leaves your market-making book while the trade is open.",
+                    () -> BazaarHelper.openTradeSetup(id));
+            button(Component.literal(r.excluded() ? "Incl" : "Excl").withStyle(r.excluded() ? ChatFormatting.GREEN : ChatFormatting.GRAY),
+                    x + half + 4, y, btnW - half - 4, r.excluded() ? "Let the book use this item again" : "Keep this item out of your book",
                     () -> { BazaarHelper.toggleExcluded(id); BazaarHelper.show(new MarketScreen()); });
             y += ROW_H;
         }

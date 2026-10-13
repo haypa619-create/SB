@@ -31,12 +31,19 @@ public final class QuoteBook {
         public int bidOrders, askOrders;
     }
 
-    public enum EventKind { SETUP_BUY, SETUP_SELL, FILLED_BUY, FILLED_SELL, CLAIM_BUY, CLAIM_SELL, CANCEL_BUY, CANCEL_SELL, REJECTED }
+    public enum EventKind { SETUP_BUY, SETUP_SELL, FILLED_BUY, FILLED_SELL, CLAIM_BUY, CLAIM_SELL, CANCEL_BUY, CANCEL_SELL, REJECTED,
+        INSTA_BUY, INSTA_SELL }
 
     /** What the last chat line did, for alerts and the journal. Not saved. */
     public record Event(EventKind kind, String item, double units, double price, double pnl, double fillSecs) {}
 
     public transient Event lastEvent;
+
+    /**
+     * Items owned by something else (open trades). Their chat lines are reported in lastEvent
+     * but never touch market-making quotes, cost basis or P&L, so the two books never mix.
+     */
+    public transient java.util.function.Predicate<String> notMine;
 
     /** Keyed by lowercase item name, as it appears in chat. */
     public Map<String, Item> items = new LinkedHashMap<>();
@@ -65,6 +72,10 @@ public final class QuoteBook {
             "^\\[Bazaar\\] Cancelled! Refunded ([\\d,.]+) coins? from cancelling Buy Order!.*$");
     // [Bazaar] Your price isn't competitive enough with the best order/offer's price.
     static final Pattern REJECTED = Pattern.compile("^\\[Bazaar\\] Your price isn't competitive enough.*$");
+    // [Bazaar] Bought 64x Enchanted Coal for 8,960 coins!   (insta-buy)
+    static final Pattern INSTA_BUY = Pattern.compile("^\\[Bazaar\\] Bought ([\\d,]+)x (.+?) for ([\\d,.]+) coins?!?.*$");
+    // [Bazaar] Sold 64x Enchanted Coal for 8,800 coins!   (insta-sell; coins received)
+    static final Pattern INSTA_SELL = Pattern.compile("^\\[Bazaar\\] Sold ([\\d,]+)x (.+?) for ([\\d,.]+) coins?!?.*$");
     // [Bazaar] Claimed 160x Enchanted Coal worth 20,832.0 coins bought for 130.2 each!
     static final Pattern CLAIM_BUY = Pattern.compile(
             "^\\[Bazaar\\] Claimed ([\\d,]+)x (.+?) worth ([\\d,.]+) coins? bought for ([\\d,.]+) each!.*$");
@@ -85,6 +96,36 @@ public final class QuoteBook {
         return onChat(raw, taxPct, System.currentTimeMillis());
     }
 
+    /**
+     * What a Bazaar chat line says, without changing anything. Price is per unit
+     * (for insta-sells, coins received per unit).
+     */
+    public static Event parse(String raw) {
+        String line = BazaarData.stripFormatting(raw).trim();
+        Matcher m;
+        if ((m = SETUP.matcher(line)).matches()) {
+            double u = num(m.group(2));
+            return u <= 0 ? null : new Event(m.group(1).startsWith("Buy") ? EventKind.SETUP_BUY : EventKind.SETUP_SELL,
+                    m.group(3), u, num(m.group(4)) / u, 0, 0);
+        }
+        if ((m = FILLED.matcher(line)).matches())
+            return new Event(m.group(1).startsWith("Buy") ? EventKind.FILLED_BUY : EventKind.FILLED_SELL, m.group(3), num(m.group(2)), 0, 0, 0);
+        if ((m = CANCELLED_SELL.matcher(line)).matches()) return new Event(EventKind.CANCEL_SELL, m.group(2), num(m.group(1)), 0, 0, 0);
+        if ((m = CANCELLED_BUY.matcher(line)).matches()) return new Event(EventKind.CANCEL_BUY, null, 0, num(m.group(1)), 0, 0);
+        if (REJECTED.matcher(line).matches()) return new Event(EventKind.REJECTED, null, 0, 0, 0, 0);
+        if ((m = CLAIM_BUY.matcher(line)).matches()) return new Event(EventKind.CLAIM_BUY, m.group(2), num(m.group(1)), num(m.group(4)), 0, 0);
+        if ((m = CLAIM_SELL.matcher(line)).matches()) return new Event(EventKind.CLAIM_SELL, m.group(3), num(m.group(2)), num(m.group(4)), 0, 0);
+        if ((m = INSTA_BUY.matcher(line)).matches()) {
+            double u = num(m.group(1));
+            return u <= 0 ? null : new Event(EventKind.INSTA_BUY, m.group(2), u, num(m.group(3)) / u, 0, 0);
+        }
+        if ((m = INSTA_SELL.matcher(line)).matches()) {
+            double u = num(m.group(1));
+            return u <= 0 ? null : new Event(EventKind.INSTA_SELL, m.group(2), u, num(m.group(3)) / u, 0, 0);
+        }
+        return null;
+    }
+
     public String onChat(String raw, double taxPct, long now) {
         lastEvent = null;
         String line = BazaarData.stripFormatting(raw).trim();
@@ -93,12 +134,23 @@ public final class QuoteBook {
         if (dailyVolume == null) dailyVolume = new LinkedHashMap<>();
         if (toClaim == null) toClaim = new LinkedHashMap<>();
 
+        Event pe = parse(line);
+        if (pe != null && (pe.kind() == EventKind.SETUP_BUY || pe.kind() == EventKind.SETUP_SELL
+                || pe.kind() == EventKind.INSTA_BUY || pe.kind() == EventKind.INSTA_SELL)) {
+            dailyVolume.merge(day(now), pe.units() * pe.price(), Double::sum); // the daily limit is account-wide
+        }
+        // Insta trades and other owners' items: report only, never touch the market-making book.
+        if (pe != null && (pe.kind() == EventKind.INSTA_BUY || pe.kind() == EventKind.INSTA_SELL
+                || pe.item() != null && notMine != null && notMine.test(pe.item()))) {
+            lastEvent = pe;
+            return null;
+        }
+
         if ((m = SETUP.matcher(line)).matches()) {
             double units = num(m.group(2));
             if (units <= 0) return null;
             double unit = num(m.group(4)) / units;
             Item it = getOrCreate(m.group(3));
-            dailyVolume.merge(day(now), num(m.group(4)), Double::sum);
             boolean buy = m.group(1).startsWith("Buy");
             lastEvent = new Event(buy ? EventKind.SETUP_BUY : EventKind.SETUP_SELL, m.group(3), units, unit, 0, 0);
             if (buy) {

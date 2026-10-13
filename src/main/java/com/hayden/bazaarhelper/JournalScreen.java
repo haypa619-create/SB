@@ -32,9 +32,12 @@ public final class JournalScreen extends DeskScreen {
         MutableComponent head = Component.literal("Journal").withStyle(ChatFormatting.GOLD)
                 .append(part("   today ", d.realizedOn(QuoteBook.day(now))))
                 .append(part("   7 days ", d.realizedLastDays(7, now)))
-                .append(part("   all time ", d.realizedTotal));
+                .append(part("   all time ", d.realizedTotal))
+                .append(Component.literal("   trading").withStyle(ChatFormatting.LIGHT_PURPLE))
+                .append(part(" ", BazaarHelper.TRADES.realizedOn(QuoteBook.day(now))))
+                .append(part(" / ", BazaarHelper.TRADES.realizedTotal));
         int fileW = 110;
-        inactive(head, left, y, w - fileW - 4, "Realized P&L: spread captured on stock sold, after tax. Days are UTC.\n"
+        inactive(head, left, y, w - fileW - 4, "Market making realized P&L (spread captured, after tax), then trading: today / all time.\nThe two are kept separate. Days are UTC.\n"
                 + "Every fill, claim and cancel is also saved to config/" + Journal.FILE + " (opens in Excel / Sheets).");
         button(Component.literal("Where's the file?"), left + w - fileW, y, fileW,
                 "Prints where the spreadsheet file is saved.", BazaarHelper::sayJournalPath);

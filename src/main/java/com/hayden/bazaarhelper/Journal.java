@@ -16,25 +16,34 @@ import java.util.Map;
  */
 public final class Journal {
     public static final String FILE = "bazaarhelper-journal.csv";
-    static final String HEADER = "time_utc,event,item,units,price,pnl,fill_minutes";
+    static final String HEADER = "time_utc,event,item,units,price,pnl,fill_minutes,book";
 
     private Journal() {}
 
     public static String row(long now, QuoteBook.Event e) {
+        return row(now, e, "mm");
+    }
+
+    /** @param book "mm" for market making, "trade" for directional trades */
+    public static String row(long now, QuoteBook.Event e, String book) {
         return String.join(",",
                 java.time.Instant.ofEpochMilli(now).toString(),
                 e.kind().name().toLowerCase(Locale.US),
                 csv(e.item() == null ? "" : e.item()),
                 num(e.units()), num(e.price()), num(e.pnl()),
-                e.fillSecs() > 0 ? String.format(Locale.US, "%.1f", e.fillSecs() / 60.0) : "");
+                e.fillSecs() > 0 ? String.format(Locale.US, "%.1f", e.fillSecs() / 60.0) : "", book);
     }
 
     public static void append(Path configDir, long now, QuoteBook.Event e) {
+        append(configDir, now, e, "mm");
+    }
+
+    public static void append(Path configDir, long now, QuoteBook.Event e, String book) {
         if (e == null) return;
         try {
             Path f = configDir.resolve(FILE);
             boolean fresh = !Files.exists(f);
-            String text = (fresh ? HEADER + "\n" : "") + row(now, e) + "\n";
+            String text = (fresh ? HEADER + "\n" : "") + row(now, e, book) + "\n";
             Files.writeString(f, text, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (Exception ex) {
             BazaarHelper.LOG.warn("Could not write journal", ex);

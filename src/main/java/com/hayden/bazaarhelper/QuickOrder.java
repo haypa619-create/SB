@@ -13,7 +13,7 @@ public final class QuickOrder {
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
     /** PLACE: a new order. CANCEL: take down a live order (to re-price or pull it). ORDERS: just open Manage Orders. */
-    public enum Mode { PLACE, CANCEL, ORDERS }
+    public enum Mode { PLACE, CANCEL, ORDERS, INSTA_BUY, INSTA_SELL }
 
     public record Active(String itemName, Side side, double price, long amount, long createdAt, Mode mode) {
         public Active(String itemName, Side side, double price, long amount, long createdAt) {
@@ -118,6 +118,18 @@ public final class QuickOrder {
         String t = BazaarData.stripFormatting(title == null ? "" : title).toLowerCase(Locale.US);
         boolean buy = a.side() == Side.BUY;
 
+        if (a.mode() == Mode.INSTA_BUY) {
+            // item > Buy Instantly > Custom Amount (sign) ; a confirm screen if Hypixel shows one
+            int c = t.contains("confirm") ? find(names, "confirm", false) : -1;
+            if (c < 0) c = find(names, "custom amount", false);
+            if (c < 0) c = find(names, "buy instantly", false);
+            return c >= 0 ? c : find(names, a.itemName().toLowerCase(Locale.US), true);
+        }
+        if (a.mode() == Mode.INSTA_SELL) {
+            int c = t.contains("confirm") ? find(names, "confirm", false) : -1;
+            if (c < 0) c = find(names, "sell instantly", false);
+            return c >= 0 ? c : find(names, a.itemName().toLowerCase(Locale.US), true);
+        }
         if (a.mode() == Mode.ORDERS) {
             return OrderSync.isOrdersTitle(title) ? -1 : find(names, "manage orders", false);
         }

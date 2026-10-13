@@ -29,7 +29,7 @@ public final class OrdersScreen extends DeskScreen {
         for (BazaarHelper.OrderRow r : rows) {
             if (r.side() == QuickOrder.Side.BUY) inBids += r.units() * r.price(); else inAsks += r.units() * r.price();
         }
-        int live = d.liveOrders(), cap = BazaarHelper.CONFIG.maxOrders;
+        int live = BazaarHelper.liveOrdersAll(), cap = BazaarHelper.CONFIG.maxOrders;
         MutableComponent head = Component.literal(String.format(Locale.US, "orders %d/%d", live, cap))
                 .withStyle(live >= cap ? ChatFormatting.RED : ChatFormatting.GOLD)
                 .append(Component.literal("   in bids " + FlipMath.fmt(inBids)).withStyle(ChatFormatting.GREEN))

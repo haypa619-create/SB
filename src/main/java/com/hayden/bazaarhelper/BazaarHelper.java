@@ -90,6 +90,8 @@ public final class BazaarHelper implements ClientModInitializer {
     private static volatile double lastTotal = -1;
     /** The mod's own price history (Hypixel's API has none), for the guard and fair value. */
     public static PriceHistory HISTORY;
+    /** Directional trades, kept apart from market making (one owner per item). */
+    public static TradeBook TRADES;
 
     @Override
     public void onInitializeClient() {
@@ -97,6 +99,8 @@ public final class BazaarHelper implements ClientModInitializer {
         CONFIG = Config.load(configDir);
         DESK = Config.loadBook(configDir);
         HISTORY = Config.loadHistory(configDir);
+        TRADES = Config.loadTrades(configDir);
+        DESK.notMine = name -> TRADES.activeFor(name) != null; // traded items never touch the market-making book
         CompletableFuture.runAsync(() -> {
             try { DATA.refreshNames(); } catch (Exception e) { LOG.warn("Item data load failed: {}", e.toString()); }
         });
@@ -151,8 +155,19 @@ public final class BazaarHelper implements ClientModInitializer {
             String note = DESK.onChat(text, CONFIG.taxPercent, now);
             QuoteBook.Event ev = DESK.lastEvent;
             if (ev != null) {
-                onDeskEvent(ev);
-                Journal.append(configDir, now, ev);
+                boolean traded = ev.item() != null && TRADES.activeFor(ev.item()) != null;
+                String tradeNote = TRADES.onEvent(ev, CONFIG.taxPercent, now);
+                if (traded) {
+                    Config.saveTrades(configDir, TRADES);
+                    if (tradeNote != null) say(Component.literal(tradeNote).withStyle(ChatFormatting.LIGHT_PURPLE));
+                    if (ev.kind() == QuoteBook.EventKind.FILLED_BUY || ev.kind() == QuoteBook.EventKind.FILLED_SELL) {
+                        ping(false);
+                        logAlert("Trade " + ev.item() + ": order filled. Claim it in Manage Orders.", 0xFF55FF);
+                    }
+                } else {
+                    onDeskEvent(ev);
+                }
+                Journal.append(configDir, now, ev, traded ? "trade" : "mm");
             }
             if (text.contains("[Bazaar]")) Config.saveBook(configDir, DESK);
             if (note != null && CONFIG.chatNotes) say(Component.literal(note).withStyle(ChatFormatting.GRAY));
@@ -289,6 +304,19 @@ public final class BazaarHelper implements ClientModInitializer {
                         name, FlipMath.fmt(it.askPrice), FlipMath.fmt(p.topAsk()))).withStyle(ChatFormatting.GOLD));
             }
         }
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product p = DATA.get(t.itemId);
+            if (p == null || t.units <= 0) continue;
+            if (t.stopHit(p.topBid())) {
+                alert(active, "trade" + t.id + ":stop", Component.literal(String.format(Locale.US,
+                        "⚠ Stop hit on your %s trade: best bid %s, stop %s. Press N to sell now.",
+                        t.name, FlipMath.fmt(p.topBid()), FlipMath.fmt(t.stop))).withStyle(ChatFormatting.RED));
+            } else if (t.targetHit(p.topBid()) && t.status != TradeBook.Status.EXITING) {
+                alert(active, "trade" + t.id + ":target", Component.literal(String.format(Locale.US,
+                        "✔ Target reached on your %s trade: best bid %s. Trading tab: Sell now or List.",
+                        t.name, FlipMath.fmt(p.topBid()))).withStyle(ChatFormatting.GREEN));
+            }
+        }
         alerted.retainAll(active);
     }
 
@@ -362,7 +390,11 @@ public final class BazaarHelper implements ClientModInitializer {
             if (sig.equals(lastSig[0])) return;
             boolean first = lastSig[0] == null;
             lastSig[0] = sig;
-            String summary = DESK.syncFrom(orders, System.currentTimeMillis());
+            List<OrderSync.Order> mmOrders = new ArrayList<>();
+            for (OrderSync.Order o : orders) if (TRADES.activeFor(o.itemName()) == null) mmOrders.add(o);
+            TRADES.syncFrom(orders);
+            Config.saveTrades(configDir, TRADES);
+            String summary = DESK.syncFrom(mmOrders, System.currentTimeMillis());
             QuickOrder.Active qa = QUICK.current(System.currentTimeMillis());
             if (qa != null && qa.mode() == QuickOrder.Mode.ORDERS) QUICK.clear();
             // A cancel is done once the order is gone from the menu, whatever chat said (other mods rewrite it).
@@ -389,6 +421,7 @@ public final class BazaarHelper implements ClientModInitializer {
             case QUOTES -> openBoard();
             case ORDERS -> show(new OrdersScreen());
             case POSITIONS -> show(new PositionsScreen());
+            case TRADING -> show(new TradesScreen());
             case MARKET -> show(new MarketScreen());
             case JOURNAL -> show(new JournalScreen());
             case ALERTS -> show(new AlertsScreen());
@@ -418,11 +451,12 @@ public final class BazaarHelper implements ClientModInitializer {
     public static String tabBadge(DeskScreen.Tab t) {
         return switch (t) {
             case ORDERS -> {
-                int n = DESK.liveOrders();
+                int n = liveOrdersAll();
                 int c = DESK.toClaim == null ? 0 : DESK.toClaim.size();
                 yield n == 0 && c == 0 ? "" : c > 0 ? n + "+" + c : Integer.toString(n);
             }
             case ALERTS -> unreadAlerts > 0 ? "(" + unreadAlerts + ")" : "";
+            case TRADING -> TRADES.active().isEmpty() ? "" : Integer.toString(TRADES.active().size());
             default -> "";
         };
     }
@@ -462,6 +496,13 @@ public final class BazaarHelper implements ClientModInitializer {
                         it.askPrice, top, st, c, false, it.askSetAt));
             }
         }
+        for (TradeBook.Trade t : TRADES.active()) {
+            BazaarData.Product p = DATA.get(t.itemId);
+            if (t.pendingBuy > 0) out.add(new OrderRow(t.itemId, "[Trade] " + t.name, QuickOrder.Side.BUY, (long) t.pendingBuy, 1,
+                    t.entryPrice, p == null ? 0 : p.topBid(), "trade entry", ChatFormatting.LIGHT_PURPLE, false, t.openedAt));
+            if (t.pendingSell > 0) out.add(new OrderRow(t.itemId, "[Trade] " + t.name, QuickOrder.Side.SELL, (long) t.pendingSell, 1,
+                    t.target, p == null ? 0 : p.topAsk(), "trade exit", ChatFormatting.LIGHT_PURPLE, false, t.openedAt));
+        }
         // problems first, then biggest
         out.sort((a, b) -> {
             int pa = a.color() == ChatFormatting.RED ? 0 : a.color() == ChatFormatting.GOLD ? 1 : 2;
@@ -488,6 +529,7 @@ public final class BazaarHelper implements ClientModInitializer {
         Planner.Book book = lastBook;
         List<PositionRow> out = new ArrayList<>();
         for (String id : ids) {
+            if (TRADES.activeForId(id) != null) continue; // shown on the Trading tab
             String name = DATA.nameFor(id);
             QuoteBook.Item d = DESK.get(name);
             BazaarData.Product p = DATA.get(id);
@@ -736,7 +778,8 @@ public final class BazaarHelper implements ClientModInitializer {
         double sum = 0;
         for (Map.Entry<String, Long> e : scanInventory().counts().entrySet()) {
             BazaarData.Product p = DATA.get(e.getKey());
-            if (p != null) sum += e.getValue() * p.topBid();
+            double mine = Math.max(0, e.getValue() - TRADES.unitsHeld(e.getKey())); // trade stock isn't market-making capital
+            if (p != null) sum += mine * p.topBid();
         }
         for (Map.Entry<String, QuoteBook.Item> e : DESK.items.entrySet()) {
             if (e.getValue().askUnits <= 0) continue;
@@ -912,7 +955,7 @@ public final class BazaarHelper implements ClientModInitializer {
     private static Planner.Book buildBook(double total) {
         List<BazaarData.Product> usable = new ArrayList<>();
         for (BazaarData.Product p : DATA.products().values()) {
-            if (!CONFIG.excluded.contains(p.id())) usable.add(p);
+            if (!CONFIG.excluded.contains(p.id()) && TRADES.activeForId(p.id()) == null) usable.add(p);
         }
         Planner.Book b = Planner.build(usable, DATA::stackSize, CONFIG.plannerSettings(total));
         lastBook = b;
@@ -966,7 +1009,7 @@ public final class BazaarHelper implements ClientModInitializer {
         double toClaim = DESK.toClaim == null ? 0 : DESK.toClaim.size();
         return new BoardScreen(new BoardScreen.Header(book, inv.freeSlots(), DESK.realizedTotal, totalMtm(),
                 NextAction.pick(cands, canPlace()), NextAction.count(cands), DATA.lastUpdated(),
-                DESK.realizedOn(today), DESK.liveOrders(), CONFIG.maxOrders, (int) toClaim,
+                DESK.realizedOn(today), liveOrdersAll(), CONFIG.maxOrders, (int) toClaim,
                 DESK.volumeOn(today), CONFIG.dailyLimit, DESK.syncedAt), rows);
     }
 
@@ -986,6 +1029,10 @@ public final class BazaarHelper implements ClientModInitializer {
             }
             Minecraft.getInstance().execute(() -> {
                 Planner.Book book = buildBook(boardTotal());
+                for (TradeBook.Trade t : TRADES.active()) {
+                    BazaarData.Product tp = DATA.get(t.itemId);
+                    if (tp != null && t.stopHit(tp.topBid())) { startInstaSell(t); return; }
+                }
                 List<NextAction.Candidate> cands = candidates(book, scanInventory());
                 NextAction.Pick p = NextAction.pick(cands, canPlace());
                 // Just cancelled to re-price: put that same item back up first.
@@ -1051,13 +1098,89 @@ public final class BazaarHelper implements ClientModInitializer {
                         QuickOrder.formatPrice(price), have)).withStyle(ChatFormatting.GRAY)));
     }
 
+    // ---------- trades ----------
+
+    public static void openTradeSetup(String id) {
+        if (TRADES.activeForId(id) != null) {
+            say(Component.literal(DATA.nameFor(id) + " already has an open trade (Trading tab).").withStyle(ChatFormatting.YELLOW));
+            show(new TradesScreen());
+            return;
+        }
+        show(new TradeSetupScreen(id));
+    }
+
+    /** Plans the trade and starts the entry: a buy order (green slots, amount and price typed in) or an insta-buy. */
+    public static void openTrade(String id, long units, TradeBook.Entry entry, double targetPct, double stopPct) {
+        BazaarData.Product p = DATA.get(id);
+        if (p == null) return;
+        double price = entry == TradeBook.Entry.ORDER ? FlipMath.round1(p.topBid() + FlipMath.TICK) : p.topAsk();
+        TradeBook.Trade t = TRADES.plan(id, DATA.nameFor(id), units, entry, price,
+                TradeBook.pctPrice(price, targetPct), TradeBook.pctPrice(price, -stopPct), System.currentTimeMillis());
+        if (t == null) { say(Component.literal("Couldn't open that trade.").withStyle(ChatFormatting.RED)); return; }
+        Config.saveTrades(configDir, TRADES);
+        say(Component.literal(String.format(Locale.US, "Trade %s: %s %,d @ %s, target %s, stop %s.",
+                t.name, entry == TradeBook.Entry.ORDER ? "buy order" : "insta-buy", units, FlipMath.fmt(price),
+                FlipMath.fmt(t.target), FlipMath.fmt(t.stop))).withStyle(ChatFormatting.LIGHT_PURPLE));
+        startTradeEntry(t);
+    }
+
+    public static void startTradeEntry(TradeBook.Trade t) {
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (conn == null) return;
+        long amount = Math.max(1, t.plannedUnits - (long) t.units);
+        if (t.entry == TradeBook.Entry.ORDER) {
+            if (!canPlace()) { say(Component.literal("At your order cap. Cancel an order first.").withStyle(ChatFormatting.YELLOW)); return; }
+            QUICK.start(new QuickOrder.Active(t.name, QuickOrder.Side.BUY, t.entryPrice, amount, System.currentTimeMillis()));
+        } else {
+            QUICK.start(new QuickOrder.Active(t.name, QuickOrder.Side.BUY, 0, amount, System.currentTimeMillis(), QuickOrder.Mode.INSTA_BUY));
+        }
+        conn.sendCommand("bz " + t.name);
+        say(Component.literal("Click the green slots" + (t.entry == TradeBook.Entry.ORDER
+                ? ": amount and price get typed in." : ": Buy Instantly > Custom Amount (typed in).")).withStyle(ChatFormatting.GRAY));
+    }
+
+    /** Exit with a sell offer at the trade's target. */
+    public static void startTradeExit(TradeBook.Trade t) {
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (conn == null) return;
+        if (!canPlace()) { say(Component.literal("At your order cap. Cancel an order first.").withStyle(ChatFormatting.YELLOW)); return; }
+        QUICK.start(new QuickOrder.Active(t.name, QuickOrder.Side.SELL, t.target, 0, System.currentTimeMillis()));
+        conn.sendCommand("bz " + t.name);
+        say(Component.literal("Trade " + t.name + ": list at the target " + FlipMath.fmt(t.target) + ". Click the green slots; price gets typed in.")
+                .withStyle(ChatFormatting.LIGHT_PURPLE));
+    }
+
+    /** Exit now at the best bid (stop hit, or you're done). */
+    public static void startInstaSell(TradeBook.Trade t) {
+        ClientPacketListener conn = Minecraft.getInstance().getConnection();
+        if (conn == null) return;
+        QUICK.start(new QuickOrder.Active(t.name, QuickOrder.Side.SELL, 0, 0, System.currentTimeMillis(), QuickOrder.Mode.INSTA_SELL));
+        conn.sendCommand("bz " + t.name);
+        say(Component.literal("Trade " + t.name + ": sell now. Click the green Sell Instantly slot.").withStyle(ChatFormatting.RED));
+    }
+
+    public static void closeTrade(TradeBook.Trade t) {
+        TRADES.close(t, System.currentTimeMillis());
+        Config.saveTrades(configDir, TRADES);
+        say(Component.literal("Trade " + t.name + " closed. " + t.name + " can go back into the market-making book.").withStyle(ChatFormatting.GRAY));
+    }
+
+    public static void deleteTrade(TradeBook.Trade t) {
+        if (TRADES.delete(t)) Config.saveTrades(configDir, TRADES);
+    }
+
     public static void openJournal() {
         show(new JournalScreen());
     }
 
     /** Room for another order under Hypixel's cap. */
     static boolean canPlace() {
-        return DESK.liveOrders() < CONFIG.maxOrders;
+        return liveOrdersAll() < CONFIG.maxOrders;
+    }
+
+    /** Market-making orders + trade orders (Hypixel's cap counts both). */
+    static int liveOrdersAll() {
+        return DESK.liveOrders() + TRADES.liveOrders();
     }
 
     /**
@@ -1217,6 +1340,14 @@ public final class BazaarHelper implements ClientModInitializer {
                 .then(setter("maxskew", "percent", v -> CONFIG.maxSkewPct = v, 0, 50, "Max skew past the best price (%)"))
                 .then(intSetter("maxorders", 1, 100, v -> CONFIG.maxOrders = v, "Max open orders"))
                 .then(literal("journal").executes(c -> { openJournal(); return 1; }))
+                .then(literal("trade").executes(c -> { openTab(DeskScreen.Tab.TRADING); return 1; })
+                        .then(argument("item", StringArgumentType.greedyString()).executes(c -> {
+                            String name = StringArgumentType.getString(c, "item");
+                            String id = DATA.idForName(name);
+                            if (id == null || DATA.get(id) == null) { reply(c, "No Bazaar item called " + name + ".", false); return 0; }
+                            openTradeSetup(id);
+                            return 1;
+                        })))
                 .then(intSetter("slots", 1, MAIN_SLOTS, v -> CONFIG.slotBudget = v, "Slot budget"))
                 .then(intSetter("maxitems", 1, 30, v -> CONFIG.maxItems = v, "Max items"))
                 .then(intSetter("maxcrowd", 1, 1000, v -> CONFIG.maxCrowd = v, "Max crowd"))
@@ -1293,6 +1424,7 @@ public final class BazaarHelper implements ClientModInitializer {
                 "/bzh minunits <20k>  min units traded per WEEK (thinner side)",
                 "/bzh tax, total, reserve, maxitem, maxitems, minmargin, maxcrowd, crowdweight",
                 "/bzh journal  P&L by day and item  |  /bzh maxorders <14>  |  /bzh dailylimit <15b>",
+                "/bzh trade [item]  Trading tab, or set up a trade on an item",
                 "/bzh drop <3>  pull bids on a % drop in 30 min  |  /bzh deviation <8>  max % above average",
                 "/bzh fairhours <6>  fair value window  |  /bzh volk <0.25>  extra edge per % of price swing",
                 "/bzh debug  print screens, signs and Bazaar chat lines",

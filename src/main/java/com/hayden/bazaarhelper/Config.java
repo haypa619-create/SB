@@ -115,6 +115,30 @@ public final class Config {
         }
     }
 
+    // ---------- trades ----------
+
+    public static TradeBook loadTrades(Path configDir) {
+        Path f = configDir.resolve("bazaarhelper-trades.json");
+        try {
+            if (Files.exists(f)) {
+                TradeBook t = GSON.fromJson(Files.readString(f), TradeBook.class);
+                if (t != null) { t.fixAfterLoad(); return t; }
+            }
+        } catch (Exception e) {
+            BazaarHelper.LOG.warn("Could not read trades, starting fresh", e);
+        }
+        return new TradeBook();
+    }
+
+    public static void saveTrades(Path configDir, TradeBook t) {
+        try {
+            Files.createDirectories(configDir);
+            Files.writeString(configDir.resolve("bazaarhelper-trades.json"), GSON.toJson(t));
+        } catch (Exception e) {
+            BazaarHelper.LOG.warn("Could not save trades", e);
+        }
+    }
+
     // ---------- price history ----------
 
     public static PriceHistory loadHistory(Path configDir) {
