@@ -106,11 +106,11 @@ public final class MarketScreen extends DeskScreen {
             x += chgW + 4;
             FillModel.Estimate fe = l.fill();
             if (fe != null) {
-                double top = Math.min(fe.bidSecsOnTop(), fe.askSecsOnTop());
-                label(Component.literal((fe.war() ? "war " : "top ") + FillModel.secs(top) + (fe.measured() ? "" : "?"))
-                                .withStyle(fe.war() ? ChatFormatting.RED : top >= 300 ? ChatFormatting.GREEN : top >= 60 ? ChatFormatting.YELLOW : ChatFormatting.GOLD),
-                        x, y, flowW, String.format(Locale.US, "A +0.1 quote stays on top ~%s (%s)\n~%.1f units fill per order, %d%% of the time on top\n%d orders near the top%s",
-                                FillModel.secs(top), fe.measured() ? "measured" : "guessed, measuring now", fe.bidFillPerOrder(),
+                double secsTop = Math.min(fe.bidSecsOnTop(), fe.askSecsOnTop());
+                label(Component.literal((fe.war() ? "war " : "secsTop ") + FillModel.secs(secsTop) + (fe.measured() ? "" : "?"))
+                                .withStyle(fe.war() ? ChatFormatting.RED : secsTop >= 300 ? ChatFormatting.GREEN : secsTop >= 60 ? ChatFormatting.YELLOW : ChatFormatting.GOLD),
+                        x, y, flowW, String.format(Locale.US, "A +0.1 quote stays on secsTop ~%s (%s)\n~%.1f units fill per order, %d%% of the time on secsTop\n%d orders near the secsTop%s",
+                                FillModel.secs(secsTop), fe.measured() ? "measured" : "guessed, measuring now", fe.bidFillPerOrder(),
                                 Math.round(100 * Math.min(fe.bidShare(), fe.askShare())), l.crowd(),
                                 fe.war() ? "\nBot war: orders get jumped before they fill" : ""));
                 x += flowW + 4;
