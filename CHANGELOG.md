@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.0
+- Realistic fills: the mod measures how often each item's top bid / ask gets jumped and estimates time on top, fills per order, and share of time on top. The book ranks on that instead of a flat 10% of flow
+- Bot wars (can't fill a unit before being jumped) are skipped
+- Orders sized to ~1.5x what can fill before you're jumped, with a Max order cap (default 50M), so you don't spend daily limit on orders that won't fill
+- Queued: when the orders ahead of you clear within 90s, the quote shows "queued, wait" instead of an outbid alert, saving a re-place
+- Settings: Max order, Wait if queue, Skip bot wars, Your relist time. Market tab "top" column; item page shows time on top and fills per order
+
 ## 0.14.0
 - Enter clicks the green slot (one click per press, no aiming) and presses Done on signs the mod filled in. Rebindable; toggle in Settings
 - Price step uses Hypixel's "Top Order +0.1" button when your price matches it exactly (skips the sign)

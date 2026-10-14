@@ -131,6 +131,19 @@ Hover an item on the board to see what the guard thinks. Turn it off in Settings
 
 Every setup, fill, claim and cancel is appended to `config/bazaarhelper-journal.csv` (opens in Excel or Google Sheets): time, event, item, units, price, P&L, minutes to fill. The **Journal** screen sorts items by realized P&L so you can drop the ones that don't pay.
 
+## Realistic fills (why orders weren't filling)
+
+Your bid only fills while it's the top bid; insta-sells hit the top first. On contested items the top gets jumped by 0.1 every few seconds, so a quote barely sits there. The mod now measures that:
+
+- **Time on top:** every 20s refresh it records when each item's top bid goes up and top ask goes down (someone jumped). From the last hour it estimates how long a fresh +0.1 quote stays on top. For the first 5 minutes of watching an item it guesses from crowding (shown with "?").
+- **Fills per order** = flow per second x time on top. **Share of time on top** = time on top / (time on top + your relist time).
+- **Est/day** = profit per unit x flow x share on top. The book ranks on that, not on a flat 10% of flow.
+- **Bot wars** (an order can't expect even 1 unit before it's jumped) are left out (Settings > Skip bot wars).
+- **Order size** = 1.5x what's expected to fill, capped by Settings > Max order (default 50M). Big orders that get jumped don't fill; they just burn your daily limit on every re-place.
+- **Queued, not outbid:** when you're jumped by orders the flow will clear within 90s (Settings > Wait if queue), the quote shows **⏳ queued** and no alert fires. You're back on top once they fill. Re-placing would cost limit and land you behind them anyway.
+
+The Market tab's "top" column and the item page show time on top and fills per order for each item.
+
 ## The book: profit per inventory slot
 
 Slots are the binding constraint, so items are ranked by **estimated profit per slot**. That favors expensive items, but only ones with deep two-way flow. Each item must clear:
