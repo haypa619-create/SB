@@ -30,8 +30,13 @@ public final class Planner {
                            int slotBudget, double stockHours, double minDailyCoinFlow, double minDailyUnits,
                            double minMarginPct, int maxCrowd, double crowdWeight) {}
 
+    /**
+     * @param maxOrderUnits biggest single order worth placing (what can fill before you're jumped)
+     * @param fill          the fill model's view, or null when planning without it
+     */
     public record Line(FlipMath.Flip flip, int crowd, int stackSize, long targetUnits, int slots,
-                       double stockCoins, double bidCoins, double estDailyProfit, double profitPerSlot) {}
+                       double stockCoins, double bidCoins, double estDailyProfit, double profitPerSlot,
+                       long maxOrderUnits, FillModel.Estimate fill) {}
 
     public record Book(List<Line> lines, double total, double reserve, double committed,
                        int slotsUsed, int slotBudget, double estDailyProfit) {
@@ -46,9 +51,19 @@ public final class Planner {
         }
     }
 
-    private record Candidate(FlipMath.Flip flip, int crowd, int stack, double unitsPerDay, long target, double score) {}
+    private record Candidate(FlipMath.Flip flip, int crowd, int stack, double unitsPerDay, long target, double score,
+                             long maxOrder, FillModel.Estimate fill) {}
 
     public static Book build(Collection<BazaarData.Product> products, ToIntFunction<String> stackSize, Settings s) {
+        return build(products, stackSize, s, null, false);
+    }
+
+    /**
+     * @param fillModel realistic fills per item (time on top, flow); null = the old 10%-of-flow guess
+     * @param skipWars  drop items where an order can't expect to fill even one unit before it's jumped
+     */
+    public static Book build(Collection<BazaarData.Product> products, ToIntFunction<String> stackSize, Settings s,
+                             java.util.function.Function<BazaarData.Product, FillModel.Estimate> fillModel, boolean skipWars) {
         double reserve = s.total() * s.reservePct() / 100.0;
         double perItemCap = s.total() * s.maxItemPct() / 100.0;
 
@@ -62,14 +77,18 @@ public final class Planner {
             if (f.dailyUnits() * f.buyAt() < s.minDailyCoinFlow()) continue;
 
             int stack = Math.max(1, stackSize.applyAsInt(p.id()));
-            double u = f.dailyUnits() * FlipMath.CAPTURE_SHARE;
+            FillModel.Estimate fe = fillModel == null ? null : fillModel.apply(p);
+            if (fe != null && skipWars && fe.war()) continue;
+            double u = fe != null ? fe.unitsPerDay() : f.dailyUnits() * FlipMath.CAPTURE_SHARE;
+            long maxOrder = fe != null ? Math.min(fe.maxOrderUnits(), MAX_ORDER_UNITS) : MAX_ORDER_UNITS;
             long target = (long) Math.floor(Math.min(Math.min(u * s.stockHours() / 24.0,
                     perItemCap / (2 * f.buyAt())), MAX_ORDER_UNITS));
             if (target < 1) continue;
             int slots = slotsFor(target, stack);
             double est = estDaily(u, target, s.stockHours(), f.profitPerUnit());
-            double score = FlipMath.crowdAdjusted(est, p.crowd(), s.crowdWeight()) / slots;
-            cands.add(new Candidate(f, p.crowd(), stack, u, target, score));
+            // With the fill model, crowding is already in the time-on-top estimate.
+            double score = (fe != null ? est : FlipMath.crowdAdjusted(est, p.crowd(), s.crowdWeight())) / slots;
+            cands.add(new Candidate(f, p.crowd(), stack, u, target, score, maxOrder, fe));
         }
         cands.sort(Comparator.comparingDouble(Candidate::score).reversed());
 
@@ -90,7 +109,8 @@ public final class Planner {
             if (2 * stockCoins < minLine) continue;
             int slots = slotsFor(t, c.stack());
             double lineEst = estDaily(c.unitsPerDay(), t, s.stockHours(), f.profitPerUnit());
-            lines.add(new Line(f, c.crowd(), c.stack(), t, slots, stockCoins, stockCoins, lineEst, lineEst / slots));
+            lines.add(new Line(f, c.crowd(), c.stack(), t, slots, stockCoins, stockCoins, lineEst, lineEst / slots,
+                    c.maxOrder(), c.fill()));
             capLeft -= 2 * stockCoins;
             slotsLeft -= slots;
             committed += 2 * stockCoins;

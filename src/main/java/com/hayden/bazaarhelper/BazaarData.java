@@ -32,14 +32,22 @@ public final class BazaarData {
     public record Product(String id, double topBid, double topAsk,
                           double instaBuyWeek, double instaSellWeek,
                           int bidCrowd, int askCrowd,
-                          double topBidUnits, int topBidOrders, double topAskUnits, int topAskOrders) {
+                          double topBidUnits, int topBidOrders, double topAskUnits, int topAskOrders,
+                          double[] bidLevels, double[] askLevels) {
+        /** Without order book depth (tests, simple callers). */
+        public Product(String id, double topBid, double topAsk, double instaBuyWeek, double instaSellWeek,
+                       int bidCrowd, int askCrowd, double topBidUnits, int topBidOrders, double topAskUnits, int topAskOrders) {
+            this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd,
+                    topBidUnits, topBidOrders, topAskUnits, topAskOrders, null, null);
+        }
+
         public Product(String id, double topBid, double topAsk, double instaBuyWeek, double instaSellWeek) {
             this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, 1, 1);
         }
 
         public Product(String id, double topBid, double topAsk, double instaBuyWeek, double instaSellWeek,
                        int bidCrowd, int askCrowd) {
-            this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd, 0, 0, 0, 0);
+            this(id, topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd, 0, 0, 0, 0, null, null);
         }
 
         /** Competing orders on the busier side; that's the side you'll relist most. */
@@ -161,7 +169,8 @@ public final class BazaarData {
             JsonObject bidTop = first(p.getAsJsonArray("sell_summary"));
             JsonObject askTop = first(p.getAsJsonArray("buy_summary"));
             out.put(e.getKey(), new Product(e.getKey(), topBid, topAsk, instaBuyWeek, instaSellWeek, bidCrowd, askCrowd,
-                    num(bidTop, "amount"), (int) num(bidTop, "orders"), num(askTop, "amount"), (int) num(askTop, "orders")));
+                    num(bidTop, "amount"), (int) num(bidTop, "orders"), num(askTop, "amount"), (int) num(askTop, "orders"),
+                    levels(p.getAsJsonArray("sell_summary")), levels(p.getAsJsonArray("buy_summary"))));
         }
         return out;
     }
@@ -192,6 +201,21 @@ public final class BazaarData {
             count += lvl.has("orders") ? lvl.get("orders").getAsInt() : 1;
         }
         return count;
+    }
+
+    /** Top DEPTH price levels as {price, amount, price, amount, ...}, best first. */
+    public static final int DEPTH = 12;
+
+    static double[] levels(JsonArray arr) {
+        if (arr == null) return new double[0];
+        int n = Math.min(DEPTH, arr.size());
+        double[] out = new double[n * 2];
+        for (int i = 0; i < n; i++) {
+            JsonObject o = arr.get(i).getAsJsonObject();
+            out[2 * i] = num(o, "pricePerUnit");
+            out[2 * i + 1] = num(o, "amount");
+        }
+        return out;
     }
 
     private static JsonObject first(JsonArray arr) {

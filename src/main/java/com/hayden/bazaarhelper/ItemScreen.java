@@ -196,6 +196,11 @@ public final class ItemScreen extends DeskScreen {
         sy = row(g, sx, sy, sw, "Top bid", FlipMath.fmt(p.topBidUnits()) + " in " + p.topBidOrders() + " order" + (p.topBidOrders() == 1 ? "" : "s"), WHITE);
         sy = row(g, sx, sy, sw, "Top ask", FlipMath.fmt(p.topAskUnits()) + " in " + p.topAskOrders() + " order" + (p.topAskOrders() == 1 ? "" : "s"), WHITE);
         sy = row(g, sx, sy, sw, "Crowd bid / ask", p.bidCrowd() + " / " + p.askCrowd(), p.crowd() <= 3 ? GREEN : p.crowd() <= 8 ? GOLD : RED);
+        FillModel.Estimate fe = BazaarHelper.fillFor(p);
+        double onTop = Math.min(fe.bidSecsOnTop(), fe.askSecsOnTop());
+        sy = row(g, sx, sy, sw, "On top per quote", "~" + FillModel.secs(onTop) + (fe.measured() ? "" : " (guess)"),
+                fe.war() ? RED : onTop >= 300 ? GREEN : onTop >= 60 ? GOLD : RED);
+        sy = row(g, sx, sy, sw, "Fills per order", String.format(Locale.US, "~%.1f units%s", fe.bidFillPerOrder(), fe.war() ? "  BOT WAR" : ""), fe.war() ? RED : WHITE);
         sy = row(g, sx, sy, sw, "Stack size", Integer.toString(BazaarHelper.DATA.stackSize(id)), WHITE);
         if (line != null) {
             sy = row(g, sx, sy, sw, "Est. / day", FlipMath.fmt(line.estDailyProfit()), GREEN);

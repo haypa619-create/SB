@@ -14,7 +14,23 @@ package com.hayden.bazaarhelper;
 public final class MarketMaker {
     public enum State { SHORT, BALANCED, LONG }
     /** PULL: you have a live bid but the guard says get out (price falling fast). */
-    public enum Action { PLACE, LIVE, OUTBID, HOLD, EMPTY, PULL }
+    /**
+     * QUEUED: outbid, but the orders ahead of you are small enough that the flow will clear them
+     * soon and you're back on top. Waiting beats re-placing (which costs daily limit and clicks).
+     */
+    public enum Action { PLACE, LIVE, OUTBID, HOLD, EMPTY, PULL, QUEUED }
+
+    /**
+     * Fill-aware limits.
+     * @param maxBidUnits   biggest bid worth placing (what can fill before you're jumped)
+     * @param maxOrderCoins hard cap on one order's coins (0 = none)
+     * @param bidWaitSecs   seconds until the flow clears the bids ahead of your live bid (NaN = unknown)
+     * @param askWaitSecs   same for your live ask
+     * @param maxWaitSecs   wait instead of re-pricing when the queue clears within this
+     */
+    public record Limits(long maxBidUnits, double maxOrderCoins, double bidWaitSecs, double askWaitSecs, double maxWaitSecs) {
+        public static final Limits NONE = new Limits(Long.MAX_VALUE, 0, Double.NaN, Double.NaN, 0);
+    }
 
     public static final double SHORT_BAND = 0.5;
     public static final double LONG_BAND = 1.5;
@@ -61,7 +77,15 @@ public final class MarketMaker {
     public static Quote quote(BazaarData.Product p, long target, long inventory,
                               long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
                               double taxPct, double skewShare, Guard.Assessment g, double maxSkewPct) {
+        return quote(p, target, inventory, liveAskUnits, liveAskPrice, liveBidUnits, liveBidPrice, taxPct, skewShare, g,
+                maxSkewPct, Limits.NONE);
+    }
+
+    public static Quote quote(BazaarData.Product p, long target, long inventory,
+                              long liveAskUnits, double liveAskPrice, long liveBidUnits, double liveBidPrice,
+                              double taxPct, double skewShare, Guard.Assessment g, double maxSkewPct, Limits lim) {
         if (g == null) g = Guard.Assessment.NONE;
+        if (lim == null) lim = Limits.NONE;
         long position = inventory + liveAskUnits;
         State state = position < target * SHORT_BAND ? State.SHORT
                 : position > target * LONG_BAND ? State.LONG : State.BALANCED;
@@ -88,8 +112,15 @@ public final class MarketMaker {
             if (g.pullBid()) {
                 bidAction = Action.PULL;
                 note = "pull your bid: " + g.reason();
+            } else if (liveBidPrice + TOLERANCE < topBid) {
+                if (lim.bidWaitSecs() <= lim.maxWaitSecs()) {
+                    bidAction = Action.QUEUED;
+                    note = "jumped, but the bids ahead clear in ~" + FillModel.secs(lim.bidWaitSecs()) + ": wait, don't re-place";
+                } else {
+                    bidAction = Action.OUTBID;
+                }
             } else {
-                bidAction = liveBidPrice + TOLERANCE < topBid ? Action.OUTBID : Action.LIVE;
+                bidAction = Action.LIVE;
             }
         } else if (topBid <= 0 || topAsk <= 0) {
             bidAction = Action.HOLD;
@@ -108,13 +139,21 @@ public final class MarketMaker {
             note = "bid would be above fair value (" + FlipMath.fmt(g.fair()) + " minus " + String.format(java.util.Locale.US, "%.2f", g.edgePct()) + "% edge)";
         } else {
             bidSize = Math.max(0, Math.min(2 * target - position, Planner.MAX_ORDER_UNITS));
+            bidSize = Math.min(bidSize, lim.maxBidUnits());
+            if (lim.maxOrderCoins() > 0 && bidPrice > 0) bidSize = Math.min(bidSize, (long) Math.floor(lim.maxOrderCoins() / bidPrice));
             bidAction = bidSize > 0 ? Action.PLACE : Action.HOLD;
         }
 
         // ---- ask side ----
         Action askAction;
         if (liveAskUnits > 0) {
-            askAction = topAsk > 0 && liveAskPrice - TOLERANCE > topAsk ? Action.OUTBID : Action.LIVE;
+            if (topAsk > 0 && liveAskPrice - TOLERANCE > topAsk) {
+                askAction = lim.askWaitSecs() <= lim.maxWaitSecs() ? Action.QUEUED : Action.OUTBID;
+                if (askAction == Action.QUEUED && note.isEmpty())
+                    note = "undercut, but the offers ahead clear in ~" + FillModel.secs(lim.askWaitSecs()) + ": wait";
+            } else {
+                askAction = Action.LIVE;
+            }
         } else if (inventory > 0 && g.holdAsk() && state != State.LONG) {
             askAction = Action.HOLD;
             if (note.isEmpty()) note = "holding stock: " + g.reason();

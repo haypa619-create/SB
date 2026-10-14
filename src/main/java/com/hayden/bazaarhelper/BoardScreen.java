@@ -210,6 +210,7 @@ public final class BoardScreen extends DeskScreen {
                         FlipMath.fmt(l.estDailyProfit()), FlipMath.fmt(l.profitPerSlot()),
                         signed(d == null ? 0 : d.realized), d == null ? 0 : d.roundTrips,
                         deskLine, q.note().isEmpty() ? "" : "\n\n" + q.note())
+                        + fillLine(l)
                         + BazaarHelper.guardInfo(l.flip().id()))))
                 .build();
         return b;
@@ -231,6 +232,8 @@ public final class BoardScreen extends DeskScreen {
                     x, y, () -> BazaarHelper.startCancel(id, QuickOrder.Side.BUY, true));
             case LIVE -> inactive(Component.literal("✔ Bid live").withStyle(ChatFormatting.DARK_GREEN), x, y,
                     "Your bid is on top.");
+            case QUEUED -> inactive(Component.literal("⏳ Bid queued").withStyle(ChatFormatting.DARK_GREEN), x, y,
+                    q.note() + "\nRe-placing would cost daily limit and land you in the same spot.");
             case HOLD, EMPTY -> inactive(Component.literal("Bid hold").withStyle(ChatFormatting.DARK_GRAY), x, y,
                     q.note().isEmpty() ? "Bid size is covered by what you hold." : q.note());
         };
@@ -249,6 +252,8 @@ public final class BoardScreen extends DeskScreen {
                     x, y, () -> BazaarHelper.startCancel(id, QuickOrder.Side.SELL, false));
             case LIVE -> inactive(Component.literal("✔ Ask live").withStyle(ChatFormatting.DARK_AQUA), x, y,
                     "Your ask is on top.");
+            case QUEUED -> inactive(Component.literal("⏳ Ask queued").withStyle(ChatFormatting.DARK_AQUA), x, y,
+                    q.note().isEmpty() ? "Undercut, but the offers ahead clear soon. Wait." : q.note());
             case HOLD -> inactive(Component.literal("Ask hold").withStyle(ChatFormatting.DARK_GRAY), x, y,
                     q.note().isEmpty() ? "Holding stock for now." : q.note());
             case EMPTY, PULL -> inactive(Component.literal("No stock").withStyle(ChatFormatting.DARK_GRAY), x, y,
@@ -271,6 +276,16 @@ public final class BoardScreen extends DeskScreen {
                 .tooltip(Tooltip.create(Component.literal(tip))).build();
         b.active = false;
         return b;
+    }
+
+    static String fillLine(Planner.Line l) {
+        FillModel.Estimate f = l.fill();
+        if (f == null) return "";
+        return String.format(Locale.US, "\n\nFills (%s): on top ~%s per quote, ~%.1f units per order, %d%% of the time on top\n"
+                        + "Orders capped at %s units so they don't burn daily limit",
+                f.measured() ? "measured" : "guessed from crowding, measuring now",
+                FillModel.secs(Math.min(f.bidSecsOnTop(), f.askSecsOnTop())), f.bidFillPerOrder(),
+                Math.round(100 * Math.min(f.bidShare(), f.askShare())), shortUnits(l.maxOrderUnits()));
     }
 
     // ---------- formatting ----------

@@ -16,7 +16,7 @@ public final class MarketScreen extends DeskScreen {
 
     /** Column to sort by (the Sort button cycles). */
     enum Sort {
-        PER_SLOT("profit per slot"), MARGIN("margin"), EST_DAY("est. per day"), CHANGE_24H("24h change"), CROWD("least crowded");
+        PER_SLOT("profit per slot"), MARGIN("margin"), EST_DAY("est. per day"), CHANGE_24H("24h change"), CROWD("calmest top");
         final String label;
         Sort(String label) { this.label = label; }
     }
@@ -51,7 +51,8 @@ public final class MarketScreen extends DeskScreen {
                 double c = chg.get(r.line().flip().id());
                 return Double.isFinite(c) ? -c : Double.MAX_VALUE;
             });
-            case CROWD -> java.util.Comparator.comparingInt(r -> r.line().crowd());
+            case CROWD -> java.util.Comparator.comparingDouble(r -> r.line().fill() == null ? r.line().crowd()
+                    : -Math.min(r.line().fill().bidSecsOnTop(), r.line().fill().askSecsOnTop()));
         };
         rows.sort(cmp);
         long inBook = rows.stream().filter(BazaarHelper.MarketRow::inBook).count();
@@ -103,6 +104,26 @@ public final class MarketScreen extends DeskScreen {
                             : c24 >= 0 ? ChatFormatting.GREEN : ChatFormatting.RED), x, y, chgW,
                     "Mid price change over 24h, from the mod's own history (n/a until it has a day)");
             x += chgW + 4;
+            FillModel.Estimate fe = l.fill();
+            if (fe != null) {
+                double top = Math.min(fe.bidSecsOnTop(), fe.askSecsOnTop());
+                label(Component.literal((fe.war() ? "war " : "top ") + FillModel.secs(top) + (fe.measured() ? "" : "?"))
+                                .withStyle(fe.war() ? ChatFormatting.RED : top >= 300 ? ChatFormatting.GREEN : top >= 60 ? ChatFormatting.YELLOW : ChatFormatting.GOLD),
+                        x, y, flowW, String.format(Locale.US, "A +0.1 quote stays on top ~%s (%s)\n~%.1f units fill per order, %d%% of the time on top\n%d orders near the top%s",
+                                FillModel.secs(top), fe.measured() ? "measured" : "guessed, measuring now", fe.bidFillPerOrder(),
+                                Math.round(100 * Math.min(fe.bidShare(), fe.askShare())), l.crowd(),
+                                fe.war() ? "\nBot war: orders get jumped before they fill" : ""));
+                x += flowW + 4;
+                String id0 = f.id();
+                int half0 = (btnW - 4) / 2;
+                button(Component.literal("Trade").withStyle(ChatFormatting.LIGHT_PURPLE), x, y, half0,
+                        "Set up a directional trade (target and stop).", () -> BazaarHelper.openTradeSetup(id0));
+                button(Component.literal(r.excluded() ? "Incl" : "Excl").withStyle(r.excluded() ? ChatFormatting.GREEN : ChatFormatting.GRAY),
+                        x + half0 + 4, y, btnW - half0 - 4, r.excluded() ? "Let the book use this item again" : "Keep this item out of your book",
+                        () -> { BazaarHelper.toggleExcluded(id0); BazaarHelper.show(new MarketScreen()); });
+                y += ROW_H;
+                continue;
+            }
             label(Component.literal("crowd " + l.crowd()).withStyle(l.crowd() <= 3 ? ChatFormatting.GREEN
                             : l.crowd() <= 8 ? ChatFormatting.YELLOW : ChatFormatting.RED), x, y, flowW,
                     String.format(Locale.US, "%d orders near the top price (0.1 wars)\n%s units a day flow through both sides",

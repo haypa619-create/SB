@@ -111,6 +111,21 @@ public final class SettingsScreen extends DeskScreen {
                         + "within this % of the planned size. 0 = always type the exact amount.",
                 () -> c.presetTolerancePct, d -> c.presetTolerancePct = clamp(c.presetTolerancePct + d * 5, 0, 100), v -> trim(v) + "%");
 
+        gy += ROW_H;
+        stepper(left, gy, colW, "Max order", "Hard cap on one order's coins. Placements count toward your daily limit,\n"
+                        + "so big orders that get jumped before filling waste it.",
+                () -> c.maxOrderCoins, d -> c.maxOrderCoins = clamp(c.maxOrderCoins + d * coinStep(Math.max(10e6, c.maxOrderCoins)), 0, 1e10),
+                v -> v <= 0 ? "none" : FlipMath.fmt(v));
+        stepper(right, gy, colW, "Wait if queue", "When jumped by a small order, wait (don't re-place) if the flow clears it\n"
+                        + "within this many seconds. You're back on top once it fills.",
+                () -> c.maxWaitSecs, d -> c.maxWaitSecs = clamp(c.maxWaitSecs + d * 15, 0, 1800), v -> FillModel.secs(v));
+        gy += ROW_H;
+        toggle(left, gy, colW, "Skip bot wars", "Leave out items where the top is jumped so fast an order can't expect\n"
+                        + "even one unit before it's outbid.", () -> c.skipWars, on -> c.skipWars = on);
+        stepper(right, gy, colW, "Your relist time", "How long you usually take to re-price after being jumped. Slower = less time\n"
+                        + "on top = lower fill estimates, so the book favors calmer items.",
+                () -> c.reactSecs, d -> c.reactSecs = clamp(c.reactSecs + d * 15, 5, 1800), v -> FillModel.secs(v));
+
         int by = gy + ROW_H + 8;
 
         // ---- footer ----

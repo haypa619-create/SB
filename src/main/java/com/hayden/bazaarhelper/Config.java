@@ -63,6 +63,21 @@ public final class Config {
     /** Use Hypixel's preset amount buttons when one is within this % of the planned size (0 = never). */
     public double presetTolerancePct = 25;
 
+    /** Plan with realistic fills (time on top x flow) instead of a flat 10% of flow. */
+    public boolean fillModel = true;
+    /** Leave out items where an order can't expect one unit before it's jumped (bot wars). */
+    public boolean skipWars = true;
+    /** How long you usually take to re-price after being jumped (seconds). */
+    public double reactSecs = 60;
+    /** Bid size = this x what's expected to fill before you're jumped. */
+    public double sizeFactor = 1.5;
+    /** Below this many units expected per order, an item counts as a bot war. */
+    public double minFillPerOrder = 1;
+    /** Hard cap on one order's coins (0 = none). Placements count toward your daily limit. */
+    public double maxOrderCoins = 50_000_000;
+    /** When jumped, wait instead of re-placing if the orders ahead clear within this many seconds. */
+    public double maxWaitSecs = 90;
+
     /** Sound on outbid, fills and pull warnings. */
     public boolean sounds = true;
 

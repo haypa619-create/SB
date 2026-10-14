@@ -93,6 +93,8 @@ public final class BazaarHelper implements ClientModInitializer {
     public static PriceHistory HISTORY;
     /** Directional trades, kept apart from market making (one owner per item). */
     public static TradeBook TRADES;
+    /** How fast each item's top gets jumped (from the 20s refreshes). */
+    public static final Churn CHURN = new Churn();
 
     @Override
     public void onInitializeClient() {
@@ -304,13 +306,14 @@ public final class BazaarHelper implements ClientModInitializer {
                 if (g.pullBid()) {
                     alert(active, id + ":pull", Component.literal("⚠ Pull your bid on " + name + ": " + g.reason() + ". Press N.")
                             .withStyle(ChatFormatting.RED));
-                } else if (it.bidPrice + MarketMaker.TOLERANCE < p.topBid()) {
+                } else if (it.bidPrice + MarketMaker.TOLERANCE < p.topBid() && !(waitSecs(p, it.bidPrice, true) <= CONFIG.maxWaitSecs)) {
                     alert(active, id + ":bid", Component.literal(String.format(Locale.US,
                             "⚠ Outbid on %s: your bid %s, top bid now %s. Press N.",
                             name, FlipMath.fmt(it.bidPrice), FlipMath.fmt(p.topBid()))).withStyle(ChatFormatting.GOLD));
                 }
             }
-            if (it.askUnits > 0 && p.topAsk() > 0 && it.askPrice - MarketMaker.TOLERANCE > p.topAsk()) {
+            if (it.askUnits > 0 && p.topAsk() > 0 && it.askPrice - MarketMaker.TOLERANCE > p.topAsk()
+                    && !(waitSecs(p, it.askPrice, false) <= CONFIG.maxWaitSecs)) {
                 alert(active, id + ":ask", Component.literal(String.format(Locale.US,
                         "⚠ Undercut on %s: your ask %s, top ask now %s. Press N.",
                         name, FlipMath.fmt(it.askPrice), FlipMath.fmt(p.topAsk()))).withStyle(ChatFormatting.GOLD));
@@ -517,7 +520,7 @@ public final class BazaarHelper implements ClientModInitializer {
         Planner.Settings b = CONFIG.plannerSettings(boardTotal());
         Planner.Settings one = new Planner.Settings(b.taxPct(), 1e15, 0, b.maxItemPct(), 1, 100_000, b.stockHours(),
                 0, 0, -100, 1_000_000, b.crowdWeight());
-        Planner.Book bk = Planner.build(List.of(p), DATA::stackSize, one);
+        Planner.Book bk = Planner.build(List.of(p), DATA::stackSize, one, fillModel(), false);
         return bk.lines().isEmpty() ? null : bk.lines().get(0);
     }
 
@@ -614,7 +617,11 @@ public final class BazaarHelper implements ClientModInitializer {
                 String st; ChatFormatting c;
                 if (p == null) { st = "no price data"; c = ChatFormatting.GRAY; }
                 else if (pull) { st = "PULL: falling"; c = ChatFormatting.RED; }
-                else if (it.bidPrice + MarketMaker.TOLERANCE < top) { st = "outbid by " + FlipMath.fmt(top - it.bidPrice); c = ChatFormatting.GOLD; }
+                else if (it.bidPrice + MarketMaker.TOLERANCE < top) {
+                    double ws = waitSecs(p, it.bidPrice, true);
+                    if (ws <= CONFIG.maxWaitSecs) { st = "queued ~" + FillModel.secs(ws) + " (wait)"; c = ChatFormatting.DARK_GREEN; }
+                    else { st = "outbid by " + FlipMath.fmt(top - it.bidPrice); c = ChatFormatting.GOLD; }
+                }
                 else if (p.bidCrowd() > 1 && Math.abs(it.bidPrice - top) <= MarketMaker.TOLERANCE) { st = "on top (shared)"; c = ChatFormatting.GREEN; }
                 else { st = "on top"; c = ChatFormatting.GREEN; }
                 out.add(new OrderRow(id, name, QuickOrder.Side.BUY, (long) it.bidUnits, Math.max(1, it.bidOrders),
@@ -624,7 +631,11 @@ public final class BazaarHelper implements ClientModInitializer {
                 double top = p == null ? 0 : p.topAsk();
                 String st; ChatFormatting c;
                 if (p == null) { st = "no price data"; c = ChatFormatting.GRAY; }
-                else if (top > 0 && it.askPrice - MarketMaker.TOLERANCE > top) { st = "undercut by " + FlipMath.fmt(it.askPrice - top); c = ChatFormatting.GOLD; }
+                else if (top > 0 && it.askPrice - MarketMaker.TOLERANCE > top) {
+                    double ws = waitSecs(p, it.askPrice, false);
+                    if (ws <= CONFIG.maxWaitSecs) { st = "queued ~" + FillModel.secs(ws) + " (wait)"; c = ChatFormatting.DARK_AQUA; }
+                    else { st = "undercut by " + FlipMath.fmt(it.askPrice - top); c = ChatFormatting.GOLD; }
+                }
                 else if (p.askCrowd() > 1 && Math.abs(it.askPrice - top) <= MarketMaker.TOLERANCE) { st = "on top (shared)"; c = ChatFormatting.AQUA; }
                 else { st = "on top"; c = ChatFormatting.AQUA; }
                 out.add(new OrderRow(id, name, QuickOrder.Side.SELL, (long) it.askUnits, Math.max(1, it.askOrders),
@@ -697,7 +708,7 @@ public final class BazaarHelper implements ClientModInitializer {
         // Unlimited coins and slots, so every item that passes the filters gets ranked on its own merits.
         Planner.Settings wide = new Planner.Settings(b.taxPct(), 1e15, 0, b.maxItemPct(), 60, 100_000, b.stockHours(),
                 b.minDailyCoinFlow(), b.minDailyUnits(), b.minMarginPct(), b.maxCrowd(), b.crowdWeight());
-        Planner.Book all = Planner.build(DATA.products().values(), DATA::stackSize, wide);
+        Planner.Book all = Planner.build(DATA.products().values(), DATA::stackSize, wide, fillModel(), false);
         Planner.Book mine = lastBook;
         long now = System.currentTimeMillis();
         List<MarketRow> out = new ArrayList<>();
@@ -985,6 +996,7 @@ public final class BazaarHelper implements ClientModInitializer {
     static void refreshPrices() throws Exception {
         DATA.refreshBazaar();
         long now = System.currentTimeMillis();
+        CHURN.observe(DATA.products().values(), now);
         double floor = CONFIG.minWeeklyUnits / 4.0;
         Set<String> keep = new HashSet<>();
         List<BazaarData.Product> liquid = new ArrayList<>();
@@ -1018,6 +1030,31 @@ public final class BazaarHelper implements ClientModInitializer {
         sb.append(g.reason().isEmpty() ? "clear" : g.reason());
         if (!g.info().isEmpty()) sb.append("\n").append(g.info());
         return sb.toString();
+    }
+
+    /** Realistic fills for one item: time on top (measured or guessed), flow, order size, war. */
+    public static FillModel.Estimate fillFor(BazaarData.Product p) {
+        long now = System.currentTimeMillis();
+        return FillModel.estimate(p.instaBuyWeek(), p.instaSellWeek(),
+                CHURN.secsOnTop(p.id(), true, now, p.bidCrowd()), CHURN.secsOnTop(p.id(), false, now, p.askCrowd()),
+                CONFIG.reactSecs, CONFIG.sizeFactor, CONFIG.minFillPerOrder, CHURN.measured(p.id(), now));
+    }
+
+    private static java.util.function.Function<BazaarData.Product, FillModel.Estimate> fillModel() {
+        return CONFIG.fillModel ? BazaarHelper::fillFor : null;
+    }
+
+    /** Seconds until the flow clears the orders ahead of your live price (NaN if unknown). */
+    static double waitSecs(BazaarData.Product p, double myPrice, boolean bid) {
+        if (p == null || p.bidLevels() == null) return Double.NaN;
+        double ahead = FillModel.unitsAhead(bid ? p.bidLevels() : p.askLevels(), myPrice, bid);
+        double flow = (bid ? p.instaSellWeek() : p.instaBuyWeek()) / FillModel.WEEK_SECS;
+        return FillModel.waitSecs(ahead, flow);
+    }
+
+    static double unitsAhead(BazaarData.Product p, double myPrice, boolean bid) {
+        if (p == null || p.bidLevels() == null) return Double.NaN;
+        return FillModel.unitsAhead(bid ? p.bidLevels() : p.askLevels(), myPrice, bid);
     }
 
     static Guard.Assessment assess(String id, BazaarData.Product p, long now) {
@@ -1127,7 +1164,7 @@ public final class BazaarHelper implements ClientModInitializer {
         for (BazaarData.Product p : DATA.products().values()) {
             if (!CONFIG.excluded.contains(p.id()) && TRADES.activeForId(p.id()) == null) usable.add(p);
         }
-        Planner.Book b = Planner.build(usable, DATA::stackSize, CONFIG.plannerSettings(total));
+        Planner.Book b = Planner.build(usable, DATA::stackSize, CONFIG.plannerSettings(total), fillModel(), CONFIG.skipWars);
         lastBook = b;
         return b;
     }
@@ -1158,7 +1195,11 @@ public final class BazaarHelper implements ClientModInitializer {
         return MarketMaker.quote(p, l.targetUnits(), inventory,
                 d == null ? 0 : (long) d.askUnits, d == null ? 0 : d.askPrice,
                 d == null ? 0 : (long) d.bidUnits, d == null ? 0 : d.bidPrice,
-                CONFIG.taxPercent, CONFIG.skewShare, assess(l.flip().id(), p, System.currentTimeMillis()), CONFIG.maxSkewPct);
+                CONFIG.taxPercent, CONFIG.skewShare, assess(l.flip().id(), p, System.currentTimeMillis()), CONFIG.maxSkewPct,
+                new MarketMaker.Limits(CONFIG.fillModel ? l.maxOrderUnits() : Long.MAX_VALUE, CONFIG.maxOrderCoins,
+                        d != null && d.bidUnits > 0 ? waitSecs(p, d.bidPrice, true) : Double.NaN,
+                        d != null && d.askUnits > 0 ? waitSecs(p, d.askPrice, false) : Double.NaN,
+                        CONFIG.maxWaitSecs));
     }
 
     private static BoardScreen buildBoard(double total) {
